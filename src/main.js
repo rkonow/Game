@@ -519,6 +519,74 @@ function ping(x, z, color, size = 1, life = 0.5) {
   scene.add(m);
   effects.push({ m, life, max: life, ring: true, size });
 }
+// visible bullets: corn kernels (ducks), seeds (hens), gold (rooster). Purely visual unless onArrive is given.
+const bulletGeo = new THREE.BoxGeometry(0.06, 0.06, 0.55);
+const bulletMats = {
+  corn: new THREE.MeshBasicMaterial({ color: 0xfff07a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
+  seed: new THREE.MeshBasicMaterial({ color: 0xfff4ea, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
+  gold: new THREE.MeshBasicMaterial({ color: 0xffc340, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
+};
+const bullets = [];
+for (let i = 0; i < 220; i++) {
+  const m = noRay(new THREE.Mesh(bulletGeo, bulletMats.corn));
+  m.visible = false; m.frustumCulled = false;
+  scene.add(m);
+  bullets.push({ m, active: false, from: new THREE.Vector3(), dir: new THREE.Vector3(), dist: 0, went: 0, speed: 0, onArrive: null });
+}
+let bulletIdx = 0;
+function shootBullet(from, to, kind, speed, onArrive, scale = 1) {
+  const b = bullets[bulletIdx++ % bullets.length];
+  if (b.active && b.onArrive) b.onArrive(); // pool wrapped: settle the old one now
+  b.active = true; b.m.visible = true; b.m.material = bulletMats[kind];
+  b.from.copy(from); b.dir.subVectors(to, from); b.dist = b.dir.length(); b.dir.normalize();
+  b.went = 0; b.speed = speed; b.onArrive = onArrive || null;
+  b.m.position.copy(from); b.m.lookAt(to); b.m.scale.set(scale, scale, scale * Math.min(1.6, speed / 90));
+}
+function updateBullets(dt) {
+  for (const b of bullets) {
+    if (!b.active) continue;
+    b.went += b.speed * dt;
+    if (b.went >= b.dist) {
+      b.active = false; b.m.visible = false;
+      const f = b.onArrive; b.onArrive = null; if (f) f();
+    } else b.m.position.copy(b.from).addScaledVector(b.dir, b.went);
+  }
+}
+
+// little bits that fly and bounce: popcorn shells, dust, hay
+const debris = [];
+const debrisGeo = new THREE.IcosahedronGeometry(1, 0);
+const debrisMats = {};
+function debrisMat(c) { return debrisMats[c] || (debrisMats[c] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.8 })); }
+function spawnDebris(pos, vel, color, size = 0.05, life = 0.9) {
+  const m = noRay(new THREE.Mesh(debrisGeo, debrisMat(color)));
+  m.position.copy(pos); m.scale.setScalar(size);
+  scene.add(m);
+  debris.push({ m, v: vel, life, spin: (Math.random() - 0.5) * 20 });
+  if (debris.length > 160) { const d = debris.shift(); scene.remove(d.m); }
+}
+function impactPuff(p, color, n = 5) {
+  for (let i = 0; i < n; i++) spawnDebris(p, new THREE.Vector3((Math.random() - 0.5) * 4, 1.5 + Math.random() * 3, (Math.random() - 0.5) * 4), color, 0.035 + Math.random() * 0.03, 0.5 + Math.random() * 0.3);
+}
+function updateDebris(dt) {
+  for (let i = debris.length - 1; i >= 0; i--) {
+    const d = debris[i];
+    d.life -= dt;
+    d.v.y -= 14 * dt;
+    d.m.position.addScaledVector(d.v, dt);
+    if (d.m.position.y < 0.03) { d.m.position.y = 0.03; d.v.y *= -0.35; d.v.x *= 0.6; d.v.z *= 0.6; }
+    d.m.rotation.x += d.spin * dt; d.m.rotation.y += d.spin * 0.7 * dt;
+    if (d.life <= 0) { scene.remove(d.m); debris.splice(i, 1); }
+  }
+}
+
+// floating damage numbers (first person only)
+const dmgNums = [];
+function dmgNumber(p, amount, crit) {
+  dmgNums.push({ x: p.x, y: p.y + 0.3, z: p.z, text: String(Math.round(amount)), life: 0.8, crit, dx: (Math.random() - 0.5) * 30 });
+  if (dmgNums.length > 40) dmgNums.shift();
+}
+
 const feathersList = [];
 const featherGeo = new THREE.PlaneGeometry(0.16, 0.32);
 function feathers(x, z, color, n) {
@@ -598,7 +666,10 @@ function sfx(kind, x, z) {
   const f = audio.createBiquadFilter(); f.type = 'bandpass';
   const g = audio.createGain();
   let len = 0.5;
-  if (kind === 'shot') { f.frequency.value = 1400; src.playbackRate.value = 1.4; g.gain.setValueAtTime(vol * 1.6, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.12); }
+  if (kind === 'pop') { f.frequency.value = 1900 + Math.random() * 500; src.playbackRate.value = 1.6 + Math.random() * 0.3; g.gain.setValueAtTime(vol * 1.3, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.07); len = 0.1; }
+  else if (kind === 'blast') { f.type = 'lowpass'; f.frequency.value = 900; src.playbackRate.value = 0.8; g.gain.setValueAtTime(vol * 3.2, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.28); len = 0.3; }
+  else if (kind === 'crack') { f.frequency.value = 2600; src.playbackRate.value = 1.1; g.gain.setValueAtTime(vol * 3, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.35); len = 0.4; }
+  else if (kind === 'shot') { f.frequency.value = 1400; src.playbackRate.value = 1.4; g.gain.setValueAtTime(vol * 1.6, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.12); }
   else if (kind === 'hit') { f.frequency.value = 3200; src.playbackRate.value = 2; g.gain.setValueAtTime(vol, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.06); }
   else if (kind === 'whoosh') {
     f.type = 'lowpass'; f.frequency.setValueAtTime(200, now); f.frequency.exponentialRampToValueAtTime(2400, now + 0.7);
@@ -619,7 +690,17 @@ let playerBase, enemyBase;
 const grenades = [];
 const game = { cp: CP_START, relink: 0, slowmo: 0, time: 0 };
 const rts = { focus: new THREE.Vector3(0, 0, 14), zoom: 26 };
-const fps = { yaw: 0, pitch: 0, firing: false, bob: 0, hitMarker: 0, hurt: 0, flash: 0, stickX: 0, stickY: 0, scoped: false };
+const fps = {
+  yaw: 0, pitch: 0, firing: false, bob: 0, hitMarker: 0, killMarker: 0, hurt: 0, flash: 0, stickX: 0, stickY: 0, scoped: false,
+  recoil: 0, vmKick: 0, shake: 0, bloom: 0, vx: 0, vz: 0, swayX: 0, swayY: 0, lastYaw: 0, lastPitch: 0,
+};
+// first-person guns (you only): fast and punchy. Damage already includes the hero bonus.
+const GUNS = {
+  trooper: { rate: 0.09, dmg: 6, spread: 0.012, pellets: 1, kick: 0.010, shake: 0.025, speed: 120, sound: 'pop' },
+  heavy: { rate: 0.55, dmg: 10, spread: 0.065, pellets: 7, kick: 0.05, shake: 0.14, speed: 95, sound: 'blast' },
+  sniper: { rate: 0.85, dmg: 65, spread: 0.025, pellets: 1, kick: 0.07, shake: 0.08, speed: 220, sound: 'crack' },
+  elite: { rate: 0.12, dmg: 8, spread: 0.015, pellets: 1, kick: 0.012, shake: 0.03, speed: 120, sound: 'pop' },
+};
 let trans = null;            // camera transition
 // Tactics mode: plan with the game paused, then ROUND_TIME seconds of live combat.
 const ROUND_TIME = 20;
@@ -735,20 +816,29 @@ function muzzlePos(u) {
 }
 
 function aiShoot(u, t) {
-  u.cool = u.rate * (0.85 + Math.random() * 0.3);
+  // ducks/hens/rooster fire 3-round bursts, others single shots (same damage per second as before)
+  const burstN = u.type === 'trooper' || u.elite ? 3 : 1;
+  if (!u.burstLeft) u.burstLeft = burstN;
+  u.burstLeft--;
+  u.cool = u.burstLeft ? 0.09 : u.rate * burstN * (0.85 + Math.random() * 0.3);
   const m = muzzlePos(u);
   const hit = Math.random() < u.acc;
   const ty = t.isBase ? 1.5 : 1.0;
   let tx = t.x, tz = t.z;
   if (t.isBase) { const d = Math.hypot(u.x - t.x, u.z - t.z) || 1; const r = t.shield ? 4.4 : 2.4; tx = t.x + (u.x - t.x) / d * r; tz = t.z + (u.z - t.z) / d * r; }
-  const col = u.elite ? 0xffd36a : u.team === PLAYER ? 0xfff07a : 0xffffff; // corn vs seeds
+  const kind = u.elite ? 'gold' : u.team === PLAYER ? 'corn' : 'seed';
+  const from = new THREE.Vector3(m.x, m.y, m.z);
+  const speed = u.type === 'sniper' ? 110 : 60;
   if (hit) {
-    tracer(m.x, m.y, m.z, tx, ty, tz, col, u.type === 'sniper' ? 0.25 : 0.09);
-    damage(t, u.dmg, u);
+    const dmg = u.dmg;
+    shootBullet(from, new THREE.Vector3(tx, ty, tz), kind, speed, () => { if (!t.dead) damage(t, dmg, u); });
+    if (u.type === 'sniper') tracer(m.x, m.y, m.z, tx, ty, tz, u.team === PLAYER ? 0xfff07a : 0xffffff, 0.2);
   } else {
-    tracer(m.x, m.y, m.z, tx + (Math.random() - 0.5) * 2.5, ty + Math.random(), tz + (Math.random() - 0.5) * 2.5, col);
+    const miss = new THREE.Vector3(tx + (Math.random() - 0.5) * 2.5, ty + (Math.random() - 0.3) * 1.2, tz + (Math.random() - 0.5) * 2.5);
+    miss.sub(from).multiplyScalar(1.6).add(from); miss.y = Math.max(0, miss.y);
+    shootBullet(from, miss, kind, speed);
   }
-  if (Math.random() < 0.5) sfx('shot', u.x, u.z);
+  if (Math.random() < 0.6) sfx(u.type === 'heavy' ? 'blast' : 'pop', u.x, u.z);
 }
 
 let shieldToast = 0;
@@ -762,7 +852,7 @@ function damage(t, amount, src) {
   if (t.armorT > 0) amount *= 0.5;
   t.hp -= amount;
   t.flash = 0.12;
-  if (t.possessed) fps.hurt = 0.5;
+  if (t.possessed) { fps.hurt = 0.5; fps.shake = Math.min(0.3, fps.shake + 0.06); }
   if (t === playerBase) radio('Our barn is under attack!', 'warn', { key: 'base', gap: 10, dropAt: playerBase });
   if (!tac.on && !t.isBase && !t.possessed && t.order.type === 'idle' && src && src.kind === 'unit' && !src.dead) t.order = { type: 'attack', target: src, auto: true };
   if (t.hp <= 0) kill(t, src);
@@ -1036,11 +1126,18 @@ const viewmodel = new THREE.Group();
   const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.1), visorMat); // corn hopper
   grip.position.set(0, 0.07, -0.05); viewmodel.add(grip);
   const wing = new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({ color: 0xffd84a, roughness: 0.7 })); // your feathery wing
-  wing.scale.set(0.07, 0.06, 0.2); wing.position.set(0.02, -0.08, -0.02); wing.rotation.x = 0.3;
+  wing.scale.set(0.05, 0.045, 0.14); wing.position.set(0.03, -0.07, 0.0); wing.rotation.x = 0.3;
+  viewmodel.userData.wing = wing;
   viewmodel.add(gun, sight, wing);
   const muzzle = new THREE.Object3D(); muzzle.position.z = -0.58; viewmodel.add(muzzle);
   viewmodel.userData.muzzle = muzzle;
-  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe08a }));
+  const flash = new THREE.Group();
+  const flashMat = new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  for (let k = 0; k < 3; k++) { // a star of crossed quads
+    const q = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.07), flashMat); q.rotation.z = k * Math.PI / 3; flash.add(q);
+  }
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  flash.add(core);
   flash.position.z = -0.62; flash.visible = false; viewmodel.add(flash);
   viewmodel.userData.flash = flash;
   viewmodel.position.set(0.22, -0.22, -0.35);
@@ -1049,6 +1146,7 @@ const viewmodel = new THREE.Group();
   viewmodel.traverse(noRay);
   camera.add(viewmodel);
 }
+
 
 const raycaster = new THREE.Raycaster();
 const tmpV = new THREE.Vector3();
@@ -1066,6 +1164,8 @@ function possess(u) {
   u.possessed = true; u.order = { type: 'idle' }; u.path = null;
   u.mesh.visible = false;
   fps.yaw = u.facing; fps.pitch = -0.05; fps.firing = false; setScoped(false);
+  fps.vx = fps.vz = fps.recoil = fps.bloom = 0; fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
+  viewmodel.userData.wing.material.color.copy(u.bodyMat.color);
   if (!selection.includes(u)) selection.push(u);
   game.slowmo = swap ? 0.6 : 1.3;
   setMode('fps', swap ? 3 : 9);
@@ -1140,32 +1240,59 @@ function useAbility() {
 }
 
 function playerShoot(u) {
-  u.cool = u.rate * POSSESS_RATE;
-  const spread = fps.scoped ? 0.001 : u.type === 'heavy' ? 0.02 : u.type === 'sniper' ? 0.03 : 0.01;
-  raycaster.setFromCamera({ x: (Math.random() - 0.5) * spread * 2, y: (Math.random() - 0.5) * spread * 2 }, camera);
-  raycaster.far = 120;
-  const targets = staticShootables.concat(entities.filter(e => !e.dead && !e.possessed).map(e => e.mesh));
-  const hit = raycaster.intersectObjects(targets, true)[0];
+  const gun = GUNS[u.type];
+  u.cool += gun.rate; if (u.cool < 0) u.cool = 0; // keeps the fire rate exact at any frame rate
   camera.updateMatrixWorld(true);
-  const mz = fps.scoped ? camera.position.clone().add(new THREE.Vector3(0, -0.2, 0)) : viewmodel.userData.muzzle.getWorldPosition(new THREE.Vector3());
-  const end = hit ? hit.point : raycaster.ray.at(120, new THREE.Vector3());
-  tracer(mz.x, mz.y, mz.z, end.x, end.y, end.z, 0xfff2b0, u.type === 'sniper' ? 0.3 : 0.09);
-  viewmodel.userData.flash.visible = true; fps.flash = 0.045;
-  viewmodel.position.z = -0.29;
-  if (u.type === 'sniper') fps.pitch = Math.min(1.4, fps.pitch + 0.03); // recoil kick
-  sfx('shot');
-  if (!hit) return;
-  const ent = hit.object.userData.entity;
-  if (ent && ent.team !== u.team) {
-    let dmg = u.dmg * POSSESS_DMG;
-    if (u.type === 'sniper' && !ent.isBase && hit.point.y > 1.25 * (ent.elite ? 1.3 : 1)) { dmg *= 2.5; toast('Beak shot!', 0.6); }
-    damage(ent, dmg, u);
-    fps.hitMarker = 0.15;
-    sfx('hit');
-    burst(end.x, end.y, end.z, 0.35, 0xffe0a0);
-  } else {
-    burst(end.x, end.y, end.z, 0.2, 0xb0b8c4);
+  const targets = staticShootables.concat(entities.filter(e => !e.dead && !e.possessed).map(e => e.mesh));
+  const mz = fps.scoped ? camera.position.clone().add(new THREE.Vector3(0, -0.15, 0)) : viewmodel.userData.muzzle.getWorldPosition(new THREE.Vector3());
+  const spreadBase = fps.scoped ? 0.0008 : gun.spread * (1 + fps.bloom * 1.5);
+  let hits = 0, killed = false;
+  for (let i = 0; i < gun.pellets; i++) {
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * spreadBase;
+    raycaster.setFromCamera({ x: Math.cos(a) * r, y: Math.sin(a) * r }, camera);
+    raycaster.far = 120;
+    const hit = raycaster.intersectObjects(targets, true)[0];
+    const end = hit ? hit.point.clone() : raycaster.ray.at(120, new THREE.Vector3());
+    const ent = hit && hit.object.userData.entity;
+    const enemy = ent && ent.team !== u.team ? ent : null;
+    if (enemy) {
+      let dmg = gun.dmg;
+      const crit = u.type === 'sniper' && !enemy.isBase && hit.point.y > 1.25 * (enemy.elite ? 1.3 : 1);
+      if (crit) { dmg *= 2.5; toast('Beak shot!', 0.6); }
+      const wasShielded = enemy.isBase && enemy.shield;
+      damage(enemy, dmg, u);
+      if (!wasShielded) dmgNumber(end, dmg, crit);
+      if (enemy.dead) killed = true;
+      hits++;
+      if (!enemy.isBase && !enemy.dead) { // knockback
+        const k = Math.min(0.35, dmg * 0.012);
+        enemy.x += raycaster.ray.direction.x * k; enemy.z += raycaster.ray.direction.z * k;
+      }
+    }
+    // the bullet you see; impact effects when it lands
+    const surf = !hit ? null : enemy ? (enemy.isBase ? 0xffe6a0 : 'feather') : hit.object === ground ? 0x6b8f3a : 0xe8c35a;
+    const team = enemy && !enemy.isBase ? enemy.team : null;
+    shootBullet(mz, end, 'corn', gun.speed, surf === null ? null : () => {
+      if (surf === 'feather') { feathers(end.x, end.z, team === ENEMY ? 0xffffff : 0xffd84a, 2); burst(end.x, end.y, end.z, 0.25, 0xfff4c0); }
+      else impactPuff(end, surf, gun.pellets > 1 ? 2 : 4);
+    }, gun.pellets > 1 ? 0.8 : 1.2);
   }
+  if (hits) { fps.hitMarker = 0.12; sfx('hit'); }
+  if (killed) fps.killMarker = 0.45;
+  // feel: flash, light, kick, shake, bloom, a popcorn shell
+  const fl = viewmodel.userData.flash;
+  fl.visible = true; fl.scale.setScalar((gun.pellets > 1 ? 1.8 : 1) * (0.8 + Math.random() * 0.7)); fl.rotation.z = Math.random() * 6;
+  fps.flash = 0.05;
+  fps.recoil += gun.kick * (0.7 + Math.random() * 0.6);
+  fps.yaw += (Math.random() - 0.5) * gun.kick * 0.5;
+  fps.vmKick = Math.min(1.5, fps.vmKick + (gun.pellets > 1 ? 1.4 : u.type === 'sniper' ? 1.2 : 0.55));
+  fps.shake = Math.min(0.3, fps.shake + gun.shake);
+  fps.bloom = Math.min(1, fps.bloom + (u.type === 'trooper' ? 0.12 : 0.5));
+  if (!fps.scoped) {
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    spawnDebris(mz.clone().addScaledVector(right, -0.05), right.multiplyScalar(2 + Math.random() * 1.5).add(new THREE.Vector3(0, 2.5 + Math.random(), 0)), 0xfffbe8, 0.035, 1.0);
+  }
+  sfx(gun.sound);
 }
 
 function updateFPS(dt, simDt) {
@@ -1182,11 +1309,35 @@ function updateFPS(dt, simDt) {
   const yaw = fps.yaw;
   const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
   const sp = u.speed * 1.15 * (fps.scoped ? 0.45 : 1);
-  u.x += (fx * f + rx * s) * sp * simDt;
-  u.z += (fz * f + rz * s) * sp * simDt;
+  // accelerate / brake smoothly instead of snapping to full speed
+  const k = Math.min(1, simDt * 12);
+  fps.vx += ((fx * f + rx * s) * sp - fps.vx) * k;
+  fps.vz += ((fz * f + rz * s) * sp - fps.vz) * k;
+  u.x += fps.vx * simDt;
+  u.z += fps.vz * simDt;
   u.facing = yaw;
-  if (len > 0.1) fps.bob += simDt * 9 * Math.min(1, len);
-  if (fps.firing && u.cool <= 0) playerShoot(u);
+  const v = Math.hypot(fps.vx, fps.vz);
+  if (v > 0.3) fps.bob += simDt * 9 * Math.min(1, v / sp);
+  if (isTouch && fps.firing) aimAssist(dt);
+  if (fps.firing) { let n = 0; while (u.cool <= 0 && n++ < 3) playerShoot(u); } // catch up on slow frames
+  else if (u.cool < 0) u.cool = 0;
+}
+
+// touch only: gently pull the aim toward the enemy closest to the crosshair
+function aimAssist(dt) {
+  let best = null, bd = 0.09;
+  for (const e of entities) {
+    if (e.dead || e.team === PLAYER || e.isBase) continue;
+    const dx = e.x - camera.position.x, dz = e.z - camera.position.z, d = Math.hypot(dx, dz);
+    if (d > 30 || d < 0.5) continue;
+    let dy = Math.atan2(-dx, -dz) - fps.yaw;
+    while (dy > Math.PI) dy -= Math.PI * 2;
+    while (dy < -Math.PI) dy += Math.PI * 2;
+    const dp = Math.atan2(1.0 - EYE, d) - fps.pitch;
+    const a = Math.hypot(dy, dp);
+    if (a < bd && hasLOS(possessed, e)) { bd = a; best = { dy, dp }; }
+  }
+  if (best) { const k = Math.min(1, dt * 4); fps.yaw += best.dy * k; fps.pitch += best.dp * k * 0.5; }
 }
 
 // ---------------------------------------------------------------- camera
@@ -1201,8 +1352,9 @@ const euler = new THREE.Euler(0, 0, 0, 'YXZ');
 function fpsPose() {
   const u = possessed;
   const bob = Math.sin(fps.bob) * 0.04;
-  euler.set(fps.pitch, fps.yaw, 0);
-  return { pos: new THREE.Vector3(u.x, EYE + bob, u.z), quat: new THREE.Quaternion().setFromEuler(euler), fov: fps.scoped ? 22 : 72 };
+  const sh = fps.shake;
+  euler.set(fps.pitch + fps.recoil + (Math.random() - 0.5) * sh * 0.08, fps.yaw + (Math.random() - 0.5) * sh * 0.08, (Math.random() - 0.5) * sh * 0.04);
+  return { pos: new THREE.Vector3(u.x + (Math.random() - 0.5) * sh * 0.05, EYE + bob, u.z), quat: new THREE.Quaternion().setFromEuler(euler), fov: fps.scoped ? 22 : 72 };
 }
 
 function setMode(m, arc = 0) {
@@ -1249,9 +1401,29 @@ function updateCamera(dt) {
     camera.fov += (pose.fov - camera.fov) * Math.min(1, dt * 14);
   }
   camera.updateProjectionMatrix();
-  viewmodel.position.z += (-0.35 - viewmodel.position.z) * Math.min(1, dt * 18);
+  // recoil springs back, the gun kicks, sways against your look and bobs as you walk
+  fps.recoil *= Math.exp(-dt * 9);
+  fps.vmKick *= Math.exp(-dt * 14);
+  fps.shake *= Math.exp(-dt * 10);
+  fps.bloom = Math.max(0, fps.bloom - dt * (fps.firing ? 1.2 : 3));
+  let dyaw = fps.yaw - fps.lastYaw; while (dyaw > Math.PI) dyaw -= Math.PI * 2; while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+  const dpitch = fps.pitch - fps.lastPitch;
+  fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
+  const ks = Math.min(1, dt * 10);
+  fps.swayX += (Math.max(-0.05, Math.min(0.05, dyaw * 0.6)) - fps.swayX) * ks;
+  fps.swayY += (Math.max(-0.05, Math.min(0.05, -dpitch * 0.6)) - fps.swayY) * ks;
+  const walk = Math.min(1, Math.hypot(fps.vx, fps.vz) / 4);
+  const portrait = camera.aspect < 1;
+  viewmodel.scale.setScalar(portrait ? 0.5 : 0.62);
+  viewmodel.position.set(
+    (portrait ? 0.09 : 0.17) + fps.swayX + Math.cos(fps.bob * 0.5) * 0.012 * walk,
+    (portrait ? -0.15 : -0.17) + fps.swayY - Math.abs(Math.sin(fps.bob * 0.5)) * 0.014 * walk - fps.vmKick * 0.012,
+    -0.35 + fps.vmKick * 0.07);
+  viewmodel.rotation.set(fps.vmKick * 0.18, fps.swayX * 1.5, -fps.swayX * 2);
   fps.flash -= dt;
   if (fps.flash <= 0) viewmodel.userData.flash.visible = false;
+  const ch = $('crosshair');
+  ch.style.transform = fps.scoped ? '' : `scale(${1 + fps.bloom * 0.9})`;
 }
 
 // ---------------------------------------------------------------- picking
@@ -1836,12 +2008,28 @@ function drawOverlay() {
     const w = Math.abs(boxSel.x1 - boxSel.x0), h = Math.abs(boxSel.y1 - boxSel.y0);
     octx.fillRect(x, y, w, h); octx.strokeRect(x, y, w, h);
   }
-  if (mode === 'fps' && fps.hitMarker > 0) {
+  if (mode === 'fps' && (fps.hitMarker > 0 || fps.killMarker > 0)) {
     const cx = innerWidth / 2, cy = innerHeight / 2;
-    octx.strokeStyle = '#ffffff'; octx.lineWidth = 2;
+    const kill = fps.killMarker > 0;
+    const g = kill ? 1 + (0.45 - fps.killMarker) * 1.5 : 1;
+    octx.strokeStyle = kill ? '#ff4a3a' : '#ffffff'; octx.lineWidth = kill ? 3 : 2;
     octx.beginPath();
-    for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { octx.moveTo(cx + a * 7, cy + b * 7); octx.lineTo(cx + a * 14, cy + b * 14); }
+    for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { octx.moveTo(cx + a * 7 * g, cy + b * 7 * g); octx.lineTo(cx + a * 15 * g, cy + b * 15 * g); }
     octx.stroke();
+  }
+  if (mode === 'fps') {
+    octx.textAlign = 'center';
+    for (const n of dmgNums) {
+      const s = toScreen(n.x, n.y + (0.8 - n.life) * 1.2, n.z);
+      if (s.behind) continue;
+      octx.globalAlpha = Math.min(1, n.life * 3);
+      octx.font = `900 ${n.crit ? 22 : 15}px system-ui`;
+      octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.7)';
+      octx.strokeText(n.text, s.x + n.dx * (0.8 - n.life), s.y);
+      octx.fillStyle = n.crit ? '#ff5a3c' : '#fff07a';
+      octx.fillText(n.text, s.x + n.dx * (0.8 - n.life), s.y);
+    }
+    octx.globalAlpha = 1;
   }
 }
 
@@ -1893,7 +2081,7 @@ function updateHud(dt) {
   if (possessed) {
     const k = Math.max(0, possessed.hp / possessed.maxHp);
     $('fpsHpFill').style.width = `${k * 100}%`;
-    $('fpsHpText').textContent = `${nameOf(possessed).toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  x${POSSESS_DMG} damage`;
+    $('fpsHpText').textContent = `${nameOf(possessed).toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  hero`;
     const t = TYPES[possessed.type];
     const ab = $('btnAbility');
     ab.textContent = possessed.type === 'sniper' ? (fps.scoped ? 'Unscope (Q)' : 'Scope (Q)') : possessed.abilityCd > 0 ? `${t.ability} ${Math.ceil(possessed.abilityCd)}s` : `${t.ability} (Q)`;
@@ -1924,6 +2112,7 @@ function frame(now) {
     if (tac.on) updateRound(simDt);
     else { updateEnemyOrders(simDt); updateBases(simDt); }
     updateGrenades(simDt);
+    updateBullets(simDt);
     entities = entities.filter(e => !e.dead);
     selection = selection.filter(e => !e.dead);
   }
@@ -1941,6 +2130,9 @@ function frame(now) {
   }
   for (const p of points) p.flag.rotation.y = Math.sin(now / 500 + p.x) * 0.3;
   fps.hitMarker -= dt;
+  fps.killMarker -= dt;
+  updateDebris(dt);
+  for (let i = dmgNums.length - 1; i >= 0; i--) { dmgNums[i].life -= dt; if (dmgNums[i].life <= 0) dmgNums.splice(i, 1); }
   fps.hurt = Math.max(0, fps.hurt - dt);
   updateEffects(dt);
   updateCamera(dt);
