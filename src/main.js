@@ -1270,6 +1270,92 @@ function dmgNumber(p, amount, crit) {
   if (dmgNums.length > 40) dmgNums.shift();
 }
 
+// ---------------------------------------------------------------- loot: dead aliens drop ore, medkits, ult cells and rare relics
+// Walk a marine over it (or near it) to pick it up. Relics stay with that marine for the rest of the campaign.
+const RELICS = {
+  plate: { name: 'Chitin Plate', text: '+10% health', hp: 0.1 },
+  gland: { name: 'Acid Gland', text: '+10% damage', dmg: 0.1 },
+  lens: { name: 'Hive Lens', text: '+6% accuracy', acc: 0.06 },
+  node: { name: 'Neural Node', text: 'ultimate charges 25% faster', ult: 0.25 },
+};
+const LOOT_KINDS = {
+  ore: { color: 0x5fd0ff, label: n => `+${n} ore` },
+  med: { color: 0x5dff9a, label: () => '+35% health' },
+  cell: { color: 0xffd36a, label: () => '+20% ultimate' },
+  relic: { color: 0xc77dff, label: r => `Relic: ${RELICS[r].name}` },
+};
+const loot = [];
+const lootGeo = {
+  ore: new THREE.OctahedronGeometry(0.2, 0),
+  med: new RoundedBoxGeometry(0.34, 0.22, 0.26, 2, 0.04),
+  cell: new THREE.CylinderGeometry(0.09, 0.09, 0.32, 12),
+  relic: new THREE.IcosahedronGeometry(0.2, 0),
+};
+const lootRing = new THREE.RingGeometry(0.32, 0.4, 24);
+function dropLoot(e) {
+  const roll = Math.random();
+  let kind = null, val = 0;
+  if (e.elite || roll < 0.035) { kind = 'relic'; const ks = Object.keys(RELICS); val = ks[Math.floor(Math.random() * ks.length)]; }
+  else if (roll < 0.45) { kind = 'ore'; val = 4 + Math.floor(Math.random() * 5); }
+  else if (roll < 0.6) kind = 'med';
+  else if (roll < 0.72) kind = 'cell';
+  if (!kind) return;
+  const L = LOOT_KINDS[kind];
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: L.color, emissive: L.color, emissiveIntensity: kind === 'med' ? 0.25 : 1.4, roughness: 0.3, metalness: 0.3 });
+  const m = new THREE.Mesh(lootGeo[kind], kind === 'med' ? toon({ color: 0xe8ecef, roughness: 0.4, metalness: 0.2 }) : mat);
+  m.castShadow = true; g.add(m);
+  if (kind === 'med') { // a green cross on top
+    const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.01, 0.05), mat), c2 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.01, 0.16), mat);
+    c1.position.y = c2.position.y = 0.115; g.add(c1, c2);
+  }
+  const ring = new THREE.Mesh(lootRing, new THREE.MeshBasicMaterial({ color: L.color, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = -0.33; g.add(ring);
+  g.position.set(e.x, 0.45, e.z);
+  g.traverse(noRay);
+  scene.add(g);
+  loot.push({ g, m, kind, val, x: e.x, z: e.z, life: 30, vy: 3, y: 0.6 });
+}
+function updateLoot(dt) {
+  for (let i = loot.length - 1; i >= 0; i--) {
+    const l = loot[i];
+    l.life -= dt;
+    // pop up, then hover and spin
+    if (l.vy !== 0) { l.vy -= 12 * dt; l.y += l.vy * dt; if (l.y <= 0.45) { l.y = 0.45; l.vy = 0; } }
+    l.g.position.y = l.y + (l.vy === 0 ? Math.sin(game.time * 3 + l.x) * 0.06 : 0);
+    l.m.rotation.y += dt * 2.2;
+    l.g.visible = l.life > 5 || Math.sin(l.life * 20) > 0;
+    let taker = null;
+    for (const u of entities) {
+      if (u.dead || u.team !== PLAYER || u.isBase || u.isTower) continue;
+      if (Math.hypot(u.x - l.x, u.z - l.z) < (u.possessed ? 1.8 : 1.3)) { taker = u; break; }
+    }
+    if (taker) takeLoot(l, taker);
+    if (taker || l.life <= 0) { scene.remove(l.g); loot.splice(i, 1); }
+  }
+}
+function takeLoot(l, u) {
+  const L = LOOT_KINDS[l.kind];
+  if (l.kind === 'ore') game.cp = Math.min(CP_MAX, game.cp + l.val);
+  if (l.kind === 'med') u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.35);
+  if (l.kind === 'cell') chargeUlt(u, 20);
+  if (l.kind === 'relic') {
+    applyRelic(u, l.val);
+    (u.relics = u.relics || []).push(l.val);
+    radio(`${u.callsign || nameOf(u)} found a relic: ${RELICS[l.val].name} (${RELICS[l.val].text})${u.rid ? ', kept for the campaign' : ''}`, 'good');
+  }
+  dmgNums.push({ x: l.x, y: 2.1, z: l.z, text: L.label(l.val), life: 1.4, crit: l.kind === 'relic', dx: 0, color: '#' + L.color.toString(16).padStart(6, '0') });
+  burst(l.x, 0.6, l.z, 0.6, L.color);
+  if (u.possessed) gunSound('ready');
+}
+function applyRelic(u, key) {
+  const r = RELICS[key]; if (!r) return;
+  if (r.hp) { const add = Math.round(u.maxHp * r.hp); u.maxHp += add; u.hp += add; }
+  if (r.dmg) u.dmg *= 1 + r.dmg;
+  if (r.acc) u.acc = Math.min(0.97, u.acc + r.acc);
+  if (r.ult) u.ultRate = (u.ultRate || 1) + r.ult;
+}
+
 const feathersList = [];
 const featherGeo = new THREE.BoxGeometry(0.1, 0.05, 0.16); // armour shards and chitin bits
 function feathers(x, z, color, n) {
@@ -1629,6 +1715,7 @@ function kill(e, src) {
   burst(e.x, e.isBase ? 2 : 1, e.z, e.isBase ? 6 : 1.2, e.isBase ? 0xffaa44 : e.team === PLAYER ? 0xffc080 : 0x9cff3a);
   feathers(e.x, e.z, e.isBase ? (e.team === PLAYER ? 0x9aa0a8 : 0x6aff2a) : e.team === PLAYER ? 0x8a9098 : 0x7aff3a, e.isBase ? 40 : 14);
   if (e.isBase) sfx('boom', e.x, e.z); else if (e.team === ENEMY && mode === 'fps' && Math.hypot(e.x - camera.position.x, e.z - camera.position.z) < 30) gunSound('screech'); else sfx(e.team === PLAYER ? 'quack' : 'bawk', e.x, e.z);
+  if (e.team === ENEMY && !e.isBase && !e.isTower) dropLoot(e);
   if (e.isBase || e.possessed) scene.remove(e.mesh);
   else { if (e.ring) e.ring.visible = false; tumble(e.mesh); }
   if (e.isBase) {
@@ -2185,7 +2272,7 @@ const KITS = {
 function chargeUlt(u, amt) {
   if (!u || u.team !== PLAYER) return;
   const before = u.ult || 0;
-  u.ult = Math.min(100, before + amt);
+  u.ult = Math.min(100, before + amt * (u.ultRate || 1));
   if (before < 100 && u.ult >= 100 && u.possessed) { toast(`Ultimate ready: ${KITS[u.type][2].name} (X)`, 1.2); sfx('chime'); }
 }
 const fwdVec = () => new THREE.Vector3(-Math.sin(fps.yaw), 0, -Math.cos(fps.yaw));
@@ -3411,16 +3498,17 @@ function drawOverlay() {
     for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { octx.moveTo(cx + a * 7 * g, cy + b * 7 * g); octx.lineTo(cx + a * 15 * g, cy + b * 15 * g); }
     octx.stroke();
   }
-  if (mode === 'fps') {
+  {
     octx.textAlign = 'center';
     for (const n of dmgNums) {
+      if (mode !== 'fps' && !n.color) continue; // damage numbers only in first person, pickup labels everywhere
       const s = toScreen(n.x, n.y + (0.8 - n.life) * 1.2, n.z);
       if (s.behind) continue;
       octx.globalAlpha = Math.min(1, n.life * 3);
       octx.font = `900 ${n.crit ? 22 : 15}px system-ui`;
       octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.7)';
       octx.strokeText(n.text, s.x + n.dx * (0.8 - n.life), s.y);
-      octx.fillStyle = n.crit ? '#ff5a3c' : '#fff07a';
+      octx.fillStyle = n.color || (n.crit ? '#ff5a3c' : '#fff07a');
       octx.fillText(n.text, s.x + n.dx * (0.8 - n.life), s.y);
     }
     octx.globalAlpha = 1;
@@ -3550,6 +3638,7 @@ function simulate(simDt, dt) {
   else { updateEnemyOrders(simDt); updateBases(simDt); }
   updateGrenades(simDt);
   updateBullets(simDt);
+  updateLoot(simDt);
   updateWall(simDt);
   updateDucklings(simDt);
   hawk.t -= simDt;
@@ -3653,7 +3742,7 @@ function renderCampaign() {
   const row = r => {
     const rk = rankOf(r.xp), on = campPick.includes(r.id);
     const next = RANKS[rk + 1];
-    return `<button class="mar${on ? ' on' : ''}" data-id="${r.id}"><i>${ICONS[r.type]}</i><span><b>${callsign(r)}</b><small>${NAMES[PLAYER][r.type]} · ${r.kills} kills · ${r.missions} missions${next ? ` · ${next.xp - r.xp} xp to ${next.tag}` : ''}</small></span><em>${chevrons(rk)}</em></button>`;
+    return `<button class="mar${on ? ' on' : ''}" data-id="${r.id}"><i>${ICONS[r.type]}</i><span><b>${callsign(r)}</b><small>${NAMES[PLAYER][r.type]} · ${r.kills} kills · ${r.missions} missions${(r.relics || []).length ? ` · ${r.relics.length} relic${r.relics.length > 1 ? "s" : ""}` : ""}${next ? ` · ${next.xp - r.xp} xp to ${next.tag}` : ''}</small></span><em>${chevrons(rk)}</em></button>`;
   };
   $('campMap').innerHTML = nodes;
   $('campBrief').innerHTML = `
@@ -3732,6 +3821,8 @@ function applyRank(u, r) {
   u.maxHp = Math.round(u.maxHp * k); u.hp = u.maxHp;
   u.dmg *= 1 + 0.1 * rk;
   if (rk >= 3) u.acc = Math.min(0.95, u.acc + 0.05);
+  for (const k of r.relics || []) applyRelic(u, k);
+  u.relics = (r.relics || []).slice();
 }
 
 // ---- during a mission
@@ -3781,11 +3872,13 @@ function campaignEnd(won) {
       lines.push(`<li class="kia"><i>${ICONS[r.type]}</i><b>${callsign(r)}</b><span>${kills} kills · killed in action</span></li>`);
       continue;
     }
+    const found = (u.relics || []).slice((r.relics || []).length);
+    r.relics = (u.relics || []).slice();
     const before = rankOf(r.xp);
     r.kills += kills; r.missions++;
     r.xp += kills + 2 + (won ? 2 : 0);
     const after = rankOf(r.xp);
-    lines.push(`<li><i>${ICONS[r.type]}</i><b>${callsign(r)}</b><span>${kills} kills${after > before ? ` · <em>promoted to ${RANKS[after].name}!</em>` : ''}</span></li>`);
+    lines.push(`<li><i>${ICONS[r.type]}</i><b>${callsign(r)}</b><span>${kills} kills${after > before ? ` · <em>promoted to ${RANKS[after].name}!</em>` : ''}${found.length ? ` · <em class="relic">found ${found.map(k => RELICS[k].name).join(', ')}</em>` : ''}</span></li>`);
   }
   // reinforcements you deployed during the mission and who made it join the roster
   const fresh = entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower && !e.rid);
@@ -4122,5 +4215,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
-  scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
+  loot, scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
 };
