@@ -208,3 +208,10 @@ body.tactics.plan #btnPossess { display: none; }
   .modes { grid-template-columns: 1fr; }
   body.tactics.plan #rtsBar button { font-size: 12px; padding: 8px 6px; }
 }
+
+/* ---- hero kits ---- */
+#btnUlt { background: linear-gradient(90deg, rgba(255,200,60,.55) var(--p, 0%), rgba(30,40,54,.88) var(--p, 0%)); }
+#btnUlt.ready { background: #ffc340; color: #3b2a1a; border-color: #fff0a0; animation: ultPulse .9s ease-in-out infinite; }
+@keyframes ultPulse { 50% { box-shadow: 0 0 18px 4px rgba(255,200,60,.8); } }
+body.touch #fpsActions { bottom: calc(172px + env(safe-area-inset-bottom)); gap: 6px; }
+body.touch #fpsActions button { min-width: 96px; min-height: 40px; padding: 6px 8px; font-size: 13px; }

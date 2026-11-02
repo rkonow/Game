@@ -177,7 +177,7 @@ for (const [x, z, w, d, h] of OBSTACLE_DEFS) {
     top.position.set(x + w * 0.12, h + 0.3, z); top.castShadow = true;
     scene.add(top);
   }
-  boxes.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
+  boxes.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h });
 }
 
 // ---------------------------------------------------------------- capture points: nests with a giant egg
@@ -448,9 +448,11 @@ function segHitsBox(x0, z0, x1, z1, b) {
   }
   return true;
 }
+const onTop = (u, b) => (u.y || 0) >= (b.h ?? 99) - 0.05 && u.x > b.minX - 0.3 && u.x < b.maxX + 0.3 && u.z > b.minZ - 0.3 && u.z < b.maxZ + 0.3;
 function hasLOS(a, b) {
   for (const box of boxes) {
     if (box.owner === b || box.owner === a) continue;
+    if (onTop(a, box) || onTop(b, box)) continue; // a heron on a hay bale sees and is seen over it
     if (segHitsBox(a.x, a.z, b.x, b.z, box)) return false;
   }
   return true;
@@ -459,6 +461,7 @@ const distTo = (a, b) => Math.hypot(b.x - a.x, b.z - a.z) - (b.isBase ? b.radius
 
 function resolveCollision(u) {
   for (const b of boxes) {
+    if ((u.y || 0) >= (b.h ?? 99) - 0.05) continue; // above it
     const px = Math.max(b.minX, Math.min(u.x, b.maxX));
     const pz = Math.max(b.minZ, Math.min(u.z, b.maxZ));
     const dx = u.x - px, dz = u.z - pz;
@@ -828,6 +831,12 @@ function aiShoot(u, t) {
   if (t.isBase) { const d = Math.hypot(u.x - t.x, u.z - t.z) || 1; const r = t.shield ? 4.4 : 2.4; tx = t.x + (u.x - t.x) / d * r; tz = t.z + (u.z - t.z) / d * r; }
   const kind = u.elite ? 'gold' : u.team === PLAYER ? 'corn' : 'seed';
   const from = new THREE.Vector3(m.x, m.y, m.z);
+  const wallHit = wall.active && u.team === ENEMY ? wallBlocks(m.x, m.z, tx, tz) : null;
+  if (wallHit) { // the goose's wing wall eats the shot
+    shootBullet(from, new THREE.Vector3(wallHit.x, ty, wallHit.z), kind, 60, () => { wall.hp -= u.dmg; impactPuff(new THREE.Vector3(wallHit.x, ty, wallHit.z), 0xffffff, 2); });
+    if (Math.random() < 0.6) sfx('pop', u.x, u.z);
+    return;
+  }
   const speed = u.type === 'sniper' ? 110 : 60;
   if (hit) {
     const dmg = u.dmg;
@@ -844,6 +853,8 @@ function aiShoot(u, t) {
 let shieldToast = 0;
 function damage(t, amount, src) {
   if (t.dead || amount <= 0) return;
+  if (t.invulnT > 0) return;
+  if (src && src.possessed && !t.isBase && t.team !== src.team && !ultDamage) chargeUlt(src, amount * 0.12);
   if (t.isBase && t.shield) {
     if (Math.random() < 0.3) burst(t.x + (Math.random() - 0.5) * 6, 1 + Math.random() * 3, t.z + (Math.random() - 0.5) * 6, 0.4, 0xffa080);
     if (src && src.possessed && performance.now() > shieldToast) { shieldToast = performance.now() + 3000; toast('Eggshell shield! Hold all 3 nests to crack it', 1.5); }
@@ -895,8 +906,10 @@ function updateUnit(u, dt) {
   u.cool -= dt;
   u.abilityCd -= dt;
   u.armorT -= dt;
+  u.invulnT = (u.invulnT || 0) - dt;
   u.moving = false;
   if (u.possessed) return;
+  if (u.stunT > 0) { u.stunT -= dt; return; }
   const o = u.order;
   if (o.type === 'bomb') { // walk until in throwing range, then lob an egg bomb
     if (Math.hypot(o.x - u.x, o.z - u.z) <= 10) { throwEgg(u, o.x, o.z); u.order = { type: 'idle' }; }
@@ -912,6 +925,8 @@ function updateUnit(u, dt) {
   }
   if (target) {
     const d = distTo(u, target);
+    // AI ducks and hens lob an egg bomb now and then (a simpler version of your ability)
+    if (u.type === 'trooper' && u.abilityCd <= 0 && !target.isBase && d > 4 && d < 10) { u.abilityCd = 9 + Math.random() * 5; throwEgg(u, target.x, target.z); }
     if (d <= u.range && hasLOS(u, target)) {
       u.path = null; u.pathGoal = null;
       u.facing = angleLerp(u.facing, facingFor(target.x - u.x, target.z - u.z), Math.min(1, dt * 12));
@@ -1164,14 +1179,14 @@ function possess(u) {
   u.possessed = true; u.order = { type: 'idle' }; u.path = null;
   u.mesh.visible = false;
   fps.yaw = u.facing; fps.pitch = -0.05; fps.firing = false; setScoped(false);
-  fps.vx = fps.vz = fps.recoil = fps.bloom = 0; fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
+  fps.vx = fps.vz = fps.recoil = fps.bloom = fps.vy = 0; fps.dash = null; u.y = 0; fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
   viewmodel.userData.wing.material.color.copy(u.bodyMat.color);
   if (!selection.includes(u)) selection.push(u);
   game.slowmo = swap ? 0.6 : 1.3;
   setMode('fps', swap ? 3 : 9);
   sfx('whoosh');
   if (!isTouch && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch { /* ignore */ } }
-  toast(`You are a ${nameOf(u)} · ${TYPES[u.type].ability} (Q)`, 1.2);
+  toast(`You are a ${nameOf(u)} · Q ${KITS[u.type][0].name} · E ${KITS[u.type][1].name} · X ultimate`, 1.6);
   sfx('quack');
 }
 
@@ -1184,6 +1199,7 @@ function dropInNear(x, z) {
 
 function exitFPS() {
   if (possessed) {
+    if (possessed.y > 0) { possessed.y = 0; resolveCollision(possessed); } // the AI can't stand on bales
     possessed.possessed = false; possessed.mesh.visible = true; possessed.order = { type: 'idle' };
     rts.focus.set(possessed.x, 0, possessed.z);
     possessed = null;
@@ -1221,21 +1237,157 @@ function setScoped(on) {
   viewmodel.visible = mode === 'fps' && !on;
 }
 
-function useAbility() {
+// ---------------------------------------------------------------- hero kits: 2 abilities + an ultimate per bird
+let ultDamage = false; // ultimates don't charge themselves
+const KITS = {
+  trooper: [{ name: 'Egg bomb', cd: 6 }, { name: 'Dive roll', cd: 5 }, { name: 'Duckling swarm' }],
+  heavy: [{ name: 'Wing wall', cd: 12 }, { name: 'Charge', cd: 8 }, { name: 'The HONK' }],
+  sniper: [{ name: 'Scope', cd: 0 }, { name: 'Stilt jump', cd: 6 }, { name: 'Hawk eye' }],
+  elite: [{ name: '' }, { name: '' }, { name: '' }],
+};
+function chargeUlt(u, amt) {
+  if (!u || u.team !== PLAYER) return;
+  const before = u.ult || 0;
+  u.ult = Math.min(100, before + amt);
+  if (before < 100 && u.ult >= 100 && u.possessed) { toast(`Ultimate ready: ${KITS[u.type][2].name} (X)`, 1.2); sfx('chime'); }
+}
+const fwdVec = () => new THREE.Vector3(-Math.sin(fps.yaw), 0, -Math.cos(fps.yaw));
+const hensNear = (x, z, r) => entities.filter(e => !e.dead && !e.isBase && e.team === ENEMY && Math.hypot(e.x - x, e.z - z) < r);
+
+function useAbility(slot = 0) {
   const u = possessed;
   if (!u) return;
-  if (u.type === 'sniper') { setScoped(!fps.scoped); return; }
-  if (u.abilityCd > 0) { toast(`${TYPES[u.type].ability} ready in ${Math.ceil(u.abilityCd)}s`, 0.8); return; }
-  u.abilityCd = TYPES[u.type].abilityCd;
-  if (u.type === 'trooper') {
+  const kit = KITS[u.type];
+  if (u.type === 'sniper' && slot === 0) { setScoped(!fps.scoped); return; }
+  u.cds = u.cds || [0, 0];
+  if (u.cds[slot] > 0) { toast(`${kit[slot].name} ready in ${Math.ceil(u.cds[slot])}s`, 0.8); return; }
+  u.cds[slot] = kit[slot].cd;
+  const f = fwdVec();
+  if (u.type === 'trooper' && slot === 0) {
     camera.updateMatrixWorld(true);
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
     const pos = camera.position.clone().addScaledVector(dir, 0.6);
     const mesh = noRay(new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({ color: 0xfff6e0 }))); mesh.scale.set(0.12, 0.16, 0.12);
     scene.add(mesh);
     grenades.push({ pos, vel: dir.multiplyScalar(15).add(new THREE.Vector3(0, 4, 0)), t: 0, mesh, src: u });
-  } else if (u.type === 'heavy') {
-    u.armorT = 5; sfx('honk'); toast('HONK! Half damage for 5s', 1);
+  } else if (u.type === 'trooper' && slot === 1) { // dive roll: quick dash you can't be hit during
+    const mv = Math.hypot(fps.vx, fps.vz) > 0.5 ? new THREE.Vector3(fps.vx, 0, fps.vz).normalize() : f;
+    fps.dash = { t: 0.32, vx: mv.x * 19, vz: mv.z * 19, roll: true };
+    u.invulnT = 0.4; sfx('whoosh');
+  } else if (u.type === 'heavy' && slot === 0) { // wing wall
+    wall.active = true; wall.t = 6; wall.hp = 450; wall.owner = u;
+    wall.mesh.visible = true; sfx('honk'); toast('Wing wall up: it blocks hen fire', 1);
+  } else if (u.type === 'heavy' && slot === 1) { // charge
+    fps.dash = { t: 0.5, vx: f.x * 17, vz: f.z * 17, charge: true, hitList: [] };
+    u.invulnT = 0; sfx('honk');
+  } else if (u.type === 'sniper' && slot === 1) { // stilt jump
+    if ((u.y || 0) > fps.floor + 0.05) { u.cds[slot] = 0; return; }
+    fps.vy = 10.5; setScoped(false); sfx('whoosh');
+  }
+}
+
+function useUlt() {
+  const u = possessed;
+  if (!u || u.type === 'elite') return;
+  if ((u.ult || 0) < 100) { toast(`Ultimate ${Math.floor(u.ult || 0)}%: deal damage and hold nests`, 0.9); return; }
+  u.ult = 0;
+  fps.shake = 0.3;
+  if (u.type === 'trooper') { // duckling swarm
+    for (let i = 0; i < 5; i++) spawnDuckling(u, i);
+    toast('Duckling swarm!', 1.2); sfx('quack'); setTimeout(() => sfx('quack'), 150);
+  } else if (u.type === 'heavy') { // the HONK: stun every hen in a cone in front of you
+    const f = fwdVec();
+    let n = 0;
+    for (const e of entities) {
+      if (e.dead || e.isBase || e.team !== ENEMY) continue;
+      const dx = e.x - u.x, dz = e.z - u.z, d = Math.hypot(dx, dz);
+      if (d > 14 || (dx * f.x + dz * f.z) / (d || 1) < 0.5) continue;
+      e.stunT = 3; ultDamage = true; damage(e, 20, u); ultDamage = false; n++;
+      e.x += dx / (d || 1) * 1.5; e.z += dz / (d || 1) * 1.5;
+    }
+    for (let k = 0; k < 3; k++) setTimeout(() => ping(u.x + f.x * 3 * (k + 1), u.z + f.z * 3 * (k + 1), 0xfff6e0, 2 + k * 1.5, 0.6), k * 90);
+    sfx('honk'); setTimeout(() => sfx('honk'), 120);
+    toast(n ? `HONK! ${n} hens stunned` : 'HONK!', 1.2);
+  } else if (u.type === 'sniper') { // hawk eye
+    hawk.t = 8; toast('Hawk eye: hens marked, shots pierce walls', 1.4); sfx('chime');
+  }
+}
+
+// goose wing wall: a feathery barrier that follows the goose
+const wall = { active: false, t: 0, hp: 0, owner: null, mesh: null };
+{
+  const g = new THREE.Group();
+  const m = new THREE.MeshBasicMaterial({ color: 0xfff6e0, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+  const panel = noRay(new THREE.Mesh(new THREE.PlaneGeometry(3, 2.2), m)); panel.position.y = 1.1;
+  const rim = noRay(new THREE.Mesh(new THREE.PlaneGeometry(3.1, 0.12), new THREE.MeshBasicMaterial({ color: 0x9fd8ff })));
+  rim.position.y = 2.2;
+  g.add(panel, rim);
+  for (let k = -3; k <= 3; k++) { const fth = noRay(new THREE.Mesh(featherGeoW(), m)); fth.position.set(k * 0.42, 1.1, 0.01); fth.scale.set(1, 3.2, 1); g.add(fth); }
+  g.visible = false; scene.add(g); wall.mesh = g;
+}
+function featherGeoW() { return new THREE.PlaneGeometry(0.3, 0.6); }
+function wallEnds() {
+  const u = wall.owner, f = fwdVec();
+  const cx = u.x + f.x * 1.3, cz = u.z + f.z * 1.3, rx = -f.z, rz = f.x;
+  return [cx - rx * 1.5, cz - rz * 1.5, cx + rx * 1.5, cz + rz * 1.5, cx, cz];
+}
+function wallBlocks(ax, az, bx, bz) {
+  if (!wall.owner || wall.owner.dead) return null;
+  const [x1, z1, x2, z2] = wallEnds();
+  const d = (bx - ax) * (z2 - z1) - (bz - az) * (x2 - x1);
+  if (Math.abs(d) < 1e-6) return null;
+  const t = ((x1 - ax) * (z2 - z1) - (z1 - az) * (x2 - x1)) / d;
+  const v = ((x1 - ax) * (bz - az) - (z1 - az) * (bx - ax)) / d;
+  return t > 0 && t < 1 && v >= 0 && v <= 1 ? { x: ax + (bx - ax) * t, z: az + (bz - az) * t } : null;
+}
+function updateWall(dt) {
+  if (!wall.active) return;
+  wall.t -= dt;
+  if (wall.t <= 0 || wall.hp <= 0 || !wall.owner || wall.owner.dead || !wall.owner.possessed) {
+    if (wall.hp <= 0) { feathers(wall.mesh.position.x, wall.mesh.position.z, 0xffffff, 16); toast('Wing wall broke', 0.8); }
+    wall.active = false; wall.mesh.visible = false; return;
+  }
+  const [, , , , cx, cz] = wallEnds();
+  wall.mesh.position.set(cx, wall.owner.y || 0, cz);
+  wall.mesh.rotation.y = fps.yaw;
+  wall.mesh.children[0].material.opacity = 0.08 + 0.17 * Math.max(0, wall.hp / 450);
+}
+
+// heron hawk eye
+const hawk = { t: 0 };
+
+// duckling swarm: tiny ducks that run at the nearest hen and pop
+const ducklings = [];
+function spawnDuckling(u, i) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0x443300 });
+  const body = new THREE.Mesh(sphere, mat); body.scale.set(0.22, 0.2, 0.26); body.position.y = 0.22;
+  const head = new THREE.Mesh(sphere, mat); head.scale.setScalar(0.15); head.position.set(0, 0.45, -0.15);
+  const bill = new THREE.Mesh(sphere, orangeMat); bill.scale.set(0.07, 0.03, 0.09); bill.position.set(0, 0.43, -0.3);
+  g.add(body, head, bill); g.traverse(noRay);
+  const a = (i - 2) * 0.35 + fps.yaw;
+  const d = { mesh: g, x: u.x - Math.sin(a) * 1.2, z: u.z - Math.cos(a) * 1.2, radius: 0.25, life: 7, src: u, hop: Math.random() * 6 };
+  g.position.set(d.x, 0, d.z); scene.add(g);
+  ducklings.push(d);
+}
+function updateDucklings(dt) {
+  for (let i = ducklings.length - 1; i >= 0; i--) {
+    const d = ducklings[i];
+    d.life -= dt; d.hop += dt * 14;
+    let best = null, bd = 30;
+    for (const e of entities) if (!e.dead && e.team === ENEMY && !e.isBase) { const dd = Math.hypot(e.x - d.x, e.z - d.z); if (dd < bd) { bd = dd; best = e; } }
+    if (best) {
+      const dx = best.x - d.x, dz = best.z - d.z, l = Math.hypot(dx, dz) || 1;
+      d.x += dx / l * 7.5 * dt; d.z += dz / l * 7.5 * dt;
+      d.mesh.rotation.y = Math.atan2(-dx, -dz);
+      resolveCollision(d);
+    }
+    d.mesh.position.set(d.x, Math.abs(Math.sin(d.hop)) * 0.25, d.z);
+    if ((best && bd < 1.1) || d.life <= 0) {
+      ultDamage = true; explode(d.x, d.z, 2.6, 45, d.src); ultDamage = false;
+      feathers(d.x, d.z, 0xffe066, 6);
+      scene.remove(d.mesh); ducklings.splice(i, 1);
+    }
   }
 }
 
@@ -1243,7 +1395,7 @@ function playerShoot(u) {
   const gun = GUNS[u.type];
   u.cool += gun.rate; if (u.cool < 0) u.cool = 0; // keeps the fire rate exact at any frame rate
   camera.updateMatrixWorld(true);
-  const targets = staticShootables.concat(entities.filter(e => !e.dead && !e.possessed).map(e => e.mesh));
+  const targets = (hawk.t > 0 ? [ground] : staticShootables).concat(entities.filter(e => !e.dead && !e.possessed).map(e => e.mesh));
   const mz = fps.scoped ? camera.position.clone().add(new THREE.Vector3(0, -0.15, 0)) : viewmodel.userData.muzzle.getWorldPosition(new THREE.Vector3());
   const spreadBase = fps.scoped ? 0.0008 : gun.spread * (1 + fps.bloom * 1.5);
   let hits = 0, killed = false;
@@ -1262,7 +1414,7 @@ function playerShoot(u) {
       const wasShielded = enemy.isBase && enemy.shield;
       damage(enemy, dmg, u);
       if (!wasShielded) dmgNumber(end, dmg, crit);
-      if (enemy.dead) killed = true;
+      if (enemy.dead) { killed = true; chargeUlt(u, 10); }
       hits++;
       if (!enemy.isBase && !enemy.dead) { // knockback
         const k = Math.min(0.35, dmg * 0.012);
@@ -1313,8 +1465,33 @@ function updateFPS(dt, simDt) {
   const k = Math.min(1, simDt * 12);
   fps.vx += ((fx * f + rx * s) * sp - fps.vx) * k;
   fps.vz += ((fz * f + rz * s) * sp - fps.vz) * k;
-  u.x += fps.vx * simDt;
-  u.z += fps.vz * simDt;
+  if (fps.dash) {
+    const dsh = fps.dash;
+    dsh.t -= simDt;
+    u.x += dsh.vx * simDt; u.z += dsh.vz * simDt;
+    if (dsh.charge) { // bowl hens over
+      for (const e of hensNear(u.x, u.z, 1.6)) {
+        if (dsh.hitList.includes(e)) continue;
+        dsh.hitList.push(e);
+        const l = Math.hypot(e.x - u.x, e.z - u.z) || 1;
+        e.x += (e.x - u.x) / l * 3; e.z += (e.z - u.z) / l * 3; e.stunT = 1.2;
+        damage(e, 25, u); fps.shake = 0.25; sfx('hit'); feathers(e.x, e.z, 0xffffff, 5);
+      }
+    }
+    if (dsh.t <= 0) fps.dash = null;
+  } else {
+    u.x += fps.vx * simDt;
+    u.z += fps.vz * simDt;
+  }
+  // height: jumping, standing on hay bales and sheds, falling off them
+  let floor = 0;
+  for (const b of boxes) if (b.h !== undefined && (u.y || 0) >= b.h - 0.35 && u.x > b.minX - 0.2 && u.x < b.maxX + 0.2 && u.z > b.minZ - 0.2 && u.z < b.maxZ + 0.2) floor = Math.max(floor, b.h);
+  fps.floor = floor;
+  fps.vy = (fps.vy || 0) - 24 * simDt;
+  u.y = (u.y || 0) + fps.vy * simDt;
+  if (u.y <= floor) { if (fps.vy < -6) { fps.shake = 0.12; fps.vmKick = 1; } u.y = floor; fps.vy = 0; }
+  for (const cd of [0, 1]) if (u.cds && u.cds[cd] > 0) u.cds[cd] -= simDt;
+  chargeUlt(u, simDt * 1.2 + (points.some(p => p.capturing) ? simDt * 4 : 0));
   u.facing = yaw;
   const v = Math.hypot(fps.vx, fps.vz);
   if (v > 0.3) fps.bob += simDt * 9 * Math.min(1, v / sp);
@@ -1354,7 +1531,8 @@ function fpsPose() {
   const bob = Math.sin(fps.bob) * 0.04;
   const sh = fps.shake;
   euler.set(fps.pitch + fps.recoil + (Math.random() - 0.5) * sh * 0.08, fps.yaw + (Math.random() - 0.5) * sh * 0.08, (Math.random() - 0.5) * sh * 0.04);
-  return { pos: new THREE.Vector3(u.x + (Math.random() - 0.5) * sh * 0.05, EYE + bob, u.z), quat: new THREE.Quaternion().setFromEuler(euler), fov: fps.scoped ? 22 : 72 };
+  const roll = fps.dash && fps.dash.roll ? Math.sin((0.32 - fps.dash.t) / 0.32 * Math.PI) : 0;
+  return { pos: new THREE.Vector3(u.x + (Math.random() - 0.5) * sh * 0.05, (u.y || 0) + EYE + bob - roll * 0.7, u.z), quat: new THREE.Quaternion().setFromEuler(euler), fov: fps.scoped ? 22 : 72 };
 }
 
 function setMode(m, arc = 0) {
@@ -1488,7 +1666,7 @@ canvas.addEventListener('pointerdown', e => {
     else if (!document.pointerLockElement) {
       try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch { /* ignore */ }
     } else if (e.button === 0) fps.firing = true;
-    else if (e.button === 2 && possessed && possessed.type === 'sniper') setScoped(!fps.scoped);
+    else if (e.button === 2 && possessed) useAbility(possessed.type === 'sniper' ? 0 : 1);
   }
 });
 
@@ -1611,8 +1789,10 @@ window.addEventListener('keydown', e => {
   } else if (mode === 'fps') {
     if (e.code === 'KeyF' || e.code === 'Tab') exitFPS();
     else if (e.code === 'KeyR') rally();
-    else if (e.code === 'KeyE') swapUnit();
-    else if (e.code === 'KeyQ') useAbility();
+    else if (e.code === 'KeyC') swapUnit();
+    else if (e.code === 'KeyQ') useAbility(0);
+    else if (e.code === 'KeyE') useAbility(1);
+    else if (e.code === 'KeyX') useUlt();
     else if (e.code === 'Space') fps.firing = true;
   }
 });
@@ -1701,7 +1881,9 @@ tapButton($('btnPossess'), possessFromSelection);
 tapButton($('btnExit'), exitFPS);
 tapButton($('btnSwap'), swapUnit);
 tapButton($('btnRally'), rally);
-tapButton($('btnAbility'), useAbility);
+tapButton($('btnAbility'), () => useAbility(0));
+tapButton($('btnAbility2'), () => useAbility(1));
+tapButton($('btnUlt'), useUlt);
 tapButton($('btnBuyTrooper'), () => buy('trooper'));
 tapButton($('btnBuyHeavy'), () => buy('heavy'));
 tapButton($('btnBuySniper'), () => buy('sniper'));
@@ -1983,7 +2165,7 @@ function drawOverlay() {
   for (const e of entities) {
     if (e.dead || e.possessed) continue;
     const selected = selection.includes(e);
-    if (!(selected || e.hp < e.maxHp || e.isBase || e.elite)) continue;
+    if (!(selected || e.hp < e.maxHp || e.isBase || e.elite || e.stunT > 0)) continue;
     const s = toScreen(e.x, e.isBase ? 5.8 : e.elite ? 2.8 : 2.0, e.z);
     if (s.behind || s.x < -50 || s.x > innerWidth + 50 || s.y < -20 || s.y > innerHeight + 20) continue;
     if (mode === 'fps' && Math.hypot(e.x - camera.position.x, e.z - camera.position.z) > 45) continue;
@@ -1999,8 +2181,18 @@ function drawOverlay() {
       octx.fillText(`EGGSHELL · hold ${points.length - playerPointCount()} more nest${points.length - playerPointCount() === 1 ? '' : 's'}`, s.x, s.y - 6);
     }
     if (e.armorT > 0) { octx.fillStyle = '#7fb8ff'; octx.fillRect(s.x - w / 2, s.y + h + 1, w, 2); }
+    if (e.stunT > 0) { octx.font = '14px system-ui'; octx.fillText('💫', s.x, s.y - 6); }
   }
   if (tac.on) drawPlans();
+  if (hawk.t > 0 && mode === 'fps') { // hens marked through walls
+    for (const e of entities) {
+      if (e.dead || e.isBase || e.team !== ENEMY) continue;
+      const s = toScreen(e.x, 1.0, e.z);
+      if (s.behind) continue;
+      octx.strokeStyle = '#ff4a3a'; octx.lineWidth = 2;
+      octx.beginPath(); octx.moveTo(s.x, s.y - 12); octx.lineTo(s.x + 9, s.y); octx.lineTo(s.x, s.y + 12); octx.lineTo(s.x - 9, s.y); octx.closePath(); octx.stroke();
+    }
+  }
   if (boxSel) {
     octx.strokeStyle = '#5dff9a'; octx.lineWidth = 1.5;
     octx.fillStyle = 'rgba(93,255,154,.12)';
@@ -2082,10 +2274,18 @@ function updateHud(dt) {
     const k = Math.max(0, possessed.hp / possessed.maxHp);
     $('fpsHpFill').style.width = `${k * 100}%`;
     $('fpsHpText').textContent = `${nameOf(possessed).toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  hero`;
-    const t = TYPES[possessed.type];
-    const ab = $('btnAbility');
-    ab.textContent = possessed.type === 'sniper' ? (fps.scoped ? 'Unscope (Q)' : 'Scope (Q)') : possessed.abilityCd > 0 ? `${t.ability} ${Math.ceil(possessed.abilityCd)}s` : `${t.ability} (Q)`;
-    ab.classList.toggle('cd', possessed.abilityCd > 0 && possessed.type !== 'sniper');
+    const kit = KITS[possessed.type], cds = possessed.cds || [0, 0];
+    const lab = (i, key) => {
+      const b = $(i ? 'btnAbility2' : 'btnAbility');
+      const scope = possessed.type === 'sniper' && i === 0;
+      b.textContent = scope ? (fps.scoped ? `Unscope (${key})` : `Scope (${key})`) : cds[i] > 0 ? `${kit[i].name} ${Math.ceil(cds[i])}s` : `${kit[i].name} (${key})`;
+      b.classList.toggle('cd', !scope && cds[i] > 0);
+    };
+    lab(0, 'Q'); lab(1, 'E');
+    const ult = Math.floor(possessed.ult || 0), ub = $('btnUlt');
+    ub.textContent = ult >= 100 ? `★ ${kit[2].name} (X)` : `★ ${ult}%`;
+    ub.classList.toggle('ready', ult >= 100);
+    ub.style.setProperty('--p', `${ult}%`);
   }
   $('vignette').style.opacity = Math.min(1, fps.hurt * 2);
   if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) $('toast').classList.remove('show'); }
@@ -2113,6 +2313,9 @@ function frame(now) {
     else { updateEnemyOrders(simDt); updateBases(simDt); }
     updateGrenades(simDt);
     updateBullets(simDt);
+    updateWall(simDt);
+    updateDucklings(simDt);
+    hawk.t -= simDt;
     entities = entities.filter(e => !e.dead);
     selection = selection.filter(e => !e.dead);
   }
@@ -2150,5 +2353,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
-  tac, goLive, startTactics, toScreen,
+  tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings,
 };

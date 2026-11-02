@@ -25,6 +25,18 @@ One loop: **sit on the nests, crack the shell, raid the coop.**
 - **Switching** is free any time, with a slow-motion swoop. If your bird gets cooked you wait 5s. Alerts ("Hens are pecking at nest B!") have a **Drop in** button that puts you in the nearest bird.
 - Hens attack in growing waves, each heading for a nest, and every ~90s the **Big Rooster** comes out to hunt the bird you're controlling.
 
+## Hero kits (first person)
+
+Each bird you control has two abilities on cooldowns and an ultimate (★) that charges while you deal damage, get kills, capture nests, and slowly over time. Ultimate charge stays on the bird, so in Tactics it carries over between rounds.
+
+| Bird | Q | E (or right click) | ★ Ultimate (X) |
+|---|---|---|---|
+| Duck | Egg bomb | Dive roll: quick dash, can't be hit | Duckling swarm: 5 ducklings run at hens and pop |
+| Goose | Wing wall: blocks hen fire in front of you | Charge: knocks hens over and stuns them | The HONK: stuns every hen in a cone for 3s |
+| Heron | Scope (headshots x2.5) | Stilt jump: leap onto hay bales and sheds | Hawk eye: hens marked through walls, shots pierce |
+
+AI ducks and hens throw the odd egg bomb too.
+
 ## Tactics mode
 
 Pick **Tactics** on the menu for a turn-based take on the same battle (6 birds vs 8 hens, no waves, no corn):
@@ -45,7 +57,7 @@ Win by holding all 3 nests at the end of a round, or by plucking every hen. Lose
 | Camera | WASD / arrows, middle-drag, wheel zoom, click minimap | Two-finger pan, pinch zoom, tap minimap |
 | Drop in | **F** or double-click a bird | Double-tap a bird or **Drop in** |
 | First person | WASD, mouse (pointer lock), click or Space to fire | Left stick, drag anywhere on the right to aim, hold **FIRE** (also aims while held); all at once, multitouch |
-| Extras | **Q** ability, **R** rally, **E** swap, **F**/**Tab** back | **Ability**, **Rally flock**, **Swap bird**, **◀ Command** |
+| Extras | **Q**/**E** abilities, **X** ultimate, **R** rally, **C** swap, **F**/**Tab** back | Ability buttons and **★** above FIRE, **Rally flock**, **Swap bird**, **◀ Command** |
 
 ## Code map
 
