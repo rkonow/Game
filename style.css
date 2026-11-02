@@ -498,3 +498,9 @@ button.big:hover { background: linear-gradient(180deg, #2a84c4, #1a5a8a); }
 }
 #over .card h1 { font-size: 32px; letter-spacing: .16em; }
 @media (max-width: 560px) { #over .card h1 { font-size: 24px; } }
+#twist { position: fixed; left: 0; right: 0; top: 34%; text-align: center; pointer-events: none; opacity: 0; z-index: 30;
+  font: 700 clamp(26px, 6vw, 56px) Rajdhani, system-ui; letter-spacing: .3em; color: #ff6a5a; text-shadow: 0 0 24px rgba(255, 60, 40, .9), 0 2px 4px #000; }
+#twist.show { animation: twistIn 3.2s ease-out forwards; }
+@keyframes twistIn { 0% { opacity: 0; transform: scale(1.6); } 10% { opacity: 1; transform: scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: scale(.96); } }
+#btnRetryCp { margin-right: 8px; }
+.story #powers { display: none; }

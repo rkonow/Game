@@ -33,7 +33,19 @@ const EYE = 1.45;
 const PLAYER_CAP = 20, ENEMY_CAP = 22;
 const RELINK_CD = 5;        // wait after your soldier dies
 const CP_BASE = 1, CP_PER_POINT = 1.5, CP_MAX = 200, CP_START = 40;
-const POINT_DEFS = [['A', -17, 0], ['B', 0, 0], ['C', 17, 0]];
+// a campaign mission launches by reloading the page with its id, so story missions can build their own map
+const LAUNCH = (() => { try { const v = sessionStorage.getItem('hivefall.launch'); if (v) { sessionStorage.removeItem('hivefall.launch'); return JSON.parse(v); } } catch (e) { /* none */ } return null; })();
+// story maps: [x, z, w, d, h] cover pieces, [x, z, w, d] rock ridges (impassable canyon walls), the relays, and both bases
+const STORY_MAPS = {
+  crash: {
+    obstacles: [[-2, 19, 4, 1, 1.7], [2.5, 14, 1, 3, 1.7], [-18, 8, 3, 3, 2.6], [11, -5, 3, 3, 2.6], [18, 0, 3, 3, 2.6], [13, 3, 5, 1.2, 2],
+      [20, -6, 1, 4, 1.8], [-3, -13, 4, 1, 1.7], [7, -13, 4, 1, 1.7], [-19, -2, 5, 1.2, 2], [-2, 1, 5, 1.2, 2], [6, -4, 1, 4, 1.8]],
+    ridges: [[-6, 21, 2, 10], [6, 18, 2, 16], [-4, 9, 22, 2], [-24, 2, 2, 28], [-10, 4, 2, 8], [3, -9, 22, 2], [24, -4, 2, 24], [-14, -15, 2, 10]],
+    points: [['R', 2, -17]],
+  },
+};
+const STORY_MAP = LAUNCH && LAUNCH.story ? STORY_MAPS[LAUNCH.story] : null;
+const POINT_DEFS = STORY_MAP ? STORY_MAP.points : [['A', -17, 0], ['B', 0, 0], ['C', 17, 0]];
 const POINT_R = 3;
 const REGEN_DELAY = 4, REGEN_RATE = 0.1; // ducks heal 10% of max hp per second once out of combat
 const PLAYER_HP = 1.25;     // your birds are a bit tougher than the hens
@@ -457,7 +469,7 @@ function updateAmbient(dt, now) {
 
 // ---------------------------------------------------------------- cover: cargo containers, crates, barriers, prefab huts
 // [x, z, width, depth, height]; layout is mirrored so both sides are fair.
-const OBSTACLE_DEFS = [
+const OBSTACLE_DEFS = STORY_MAP ? STORY_MAP.obstacles : [
   [-10, 0, 5, 1.2, 2], [10, 0, 5, 1.2, 2],
   [0, -7, 1.2, 4, 1.8], [0, 7, 1.2, 4, 1.8],
   [-18, -10, 3, 3, 2.6], [18, 10, 3, 3, 2.6], [-18, 10, 3, 3, 2.6], [18, -10, 3, 3, 2.6],
@@ -512,6 +524,28 @@ OBSTACLE_DEFS.forEach(([x, z, w, d, h], idx) => {
   }
   boxes.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h });
 });
+if (STORY_MAP) { // canyon walls: a rock core lined with boulders so the silhouette reads as cliffs, not boxes
+  const ridgeMat = toon({ map: rockTex.col, normalMap: rockTex.nrm, roughness: 0.95, metalness: 0.02, color: 0x9a7a66 });
+  const bGeos = [rockGeo(11, 1), rockGeo(23, 1), rockGeo(37, 1)];
+  STORY_MAP.ridges.forEach(([x, z, w, d], k) => {
+    const h = 4.2;
+    const core = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), ridgeMat);
+    core.position.set(x, h / 2, z); core.castShadow = core.receiveShadow = true; scene.add(core);
+    staticShootables.push(core);
+    const len = Math.max(w, d), along = w > d;
+    for (let t = -len / 2; t <= len / 2; t += 1.6) {
+      for (const side of [-1, 1]) {
+        const r = noRay(new THREE.Mesh(bGeos[(k + Math.round(t * 3) + (side > 0 ? 1 : 0)) % 3 + 0], rockMat));
+        const sc = 1.1 + ((Math.sin(t * 12.9 + k * 7 + side) + 1) * 0.5) * 1.1;
+        r.scale.set(sc, sc * (1.2 + Math.abs(Math.sin(t * 3.1 + k))), sc);
+        const off = (Math.min(w, d) / 2) * side * 0.7;
+        r.position.set(along ? x + t : x + off, sc * 0.6 + Math.abs(Math.sin(t * 5 + k)) * 1.2, along ? z + off : z + t);
+        r.rotation.set(t, t * 2 + k, 0); r.castShadow = true; scene.add(r);
+      }
+    }
+    boxes.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h });
+  });
+}
 
 // ---------------------------------------------------------------- capture points: comms relays with a glowing core
 const NEUTRAL_COLOR = 0xdfe6f0;
@@ -1663,6 +1697,7 @@ function buy(type) {
     if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} ore`, 1); return; }
     setTool(tac.tool === 'place:' + type ? 'move' : 'place:' + type); return; // tapping the button again cancels
   }
+  if (camp.m && camp.m.story) { toast('No reinforcements out here. Keep your squad alive', 1.4); return; }
   if (countUnits(PLAYER) >= PLAYER_CAP) { toast('The squad is full', 1); return; }
   if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} ore`, 1); return; }
   game.cp -= COSTS[type];
@@ -1673,7 +1708,7 @@ function buy(type) {
 }
 
 function updateBases(dt) {
-  if (!enemyBase.dead) {
+  if (!enemyBase.dead && !(camp.m && camp.m.story)) {
     waveTimer -= dt;
     if (waveTimer <= 0) {
       waveNum++;
@@ -2695,7 +2730,7 @@ function renderTopbar(dt) {
   const pb = Math.max(0, playerBase.hp / playerBase.maxHp), eb = Math.max(0, enemyBase.hp / enemyBase.maxHp);
   const nest = p => `<span class="nest ${p.owner === PLAYER ? 'mine' : p.owner === ENEMY ? 'theirs' : ''}${p.contested ? ' fight' : ''}">${p.name}</span>`;
   const bar = (label, k, cls, extra = '') => `<span class="base ${cls}"><b>${label}</b><em><s style="width:${Math.round(k * 100)}%"></s></em>${extra}</span>`;
-  const timer = tac.on ? `<span class="chip">👾 ${countUnits(ENEMY)} vs 🪖 ${countUnits(PLAYER)}</span>` : `<span class="chip">👾 wave in ${Math.ceil(waveTimer)}s</span>`;
+  const timer = camp.m && camp.m.story ? '' : tac.on ? `<span class="chip">👾 ${countUnits(ENEMY)} vs 🪖 ${countUnits(PLAYER)}</span>` : `<span class="chip">👾 wave in ${Math.ceil(waveTimer)}s</span>`;
   $('status').innerHTML = `<span class="nests">${points.map(nest).join('')}</span>${bar('Outpost', pb, 'ours')}${bar('Hive', eb, 'enemy', enemyBase.shield ? '<i title="Bio-shield: hold all 3 relays">🛡</i>' : '<i title="Cracked!">💥</i>')}${timer}${campaignObjective()}`;
 }
 
@@ -2721,7 +2756,7 @@ function startGame(tactics = false) {
     return;
   }
   toast(isTouch ? 'Double-tap a marine to take control' : 'Double-click a marine (or press F) to take control', 3);
-  setTimeout(() => radio('Only YOU can capture a relay: drop into a marine and stand on relay B', 'good', { dropAt: points[1] }), 1200);
+  if (!(camp.m && camp.m.story)) setTimeout(() => radio('Only YOU can capture a relay: drop into a marine and stand on relay B', 'good', { dropAt: points[1] }), 1200);
 }
 
 function endGame(won, text) {
@@ -2732,7 +2767,12 @@ function endGame(won, text) {
   document.body.classList.remove('fps', 'scoped');
   $('overTitle').textContent = won ? 'Hive destroyed!' : 'Outpost overrun.';
   $('overText').textContent = text || (won ? `The hive burned after ${waveNum} waves. The colony is safe.` : `The swarm overran the outpost during wave ${waveNum}.`);
-  if (camp.m) { // campaign: write the results into the squad and show the debrief
+  if (camp.m && camp.m.story && !won) { // a story mission restarts from its last checkpoint; nobody is lost for good on a failed attempt
+    camp.done = true;
+    $('overTitle').textContent = 'Squad lost';
+    $('overDebrief').innerHTML = `<p class="recruits">Restart from <b>${STORIES[camp.m.story][story.checkpoint].name}</b> with the same marines.</p>`;
+    $('btnRetryCp').classList.remove('hidden'); $('btnToMap').classList.remove('hidden'); $('btnRestart').classList.add('hidden');
+  } else if (camp.m) { // campaign: write the results into the squad and show the debrief
     const d = campaignEnd(won);
     $('overTitle').textContent = d.title;
     $('overDebrief').innerHTML = d.html;
@@ -3077,6 +3117,7 @@ const hex = c => '#' + c.toString(16).padStart(6, '0');
 function drawOverlay() {
   octx.clearRect(0, 0, innerWidth, innerHeight);
   if (mode === 'menu') return;
+  storyOverlay();
   // point labels
   octx.textAlign = 'center';
   for (const p of points) {
@@ -3110,7 +3151,7 @@ function drawOverlay() {
     if (e.isBase && e.shield) {
       octx.strokeStyle = '#ffa080'; octx.lineWidth = 2; octx.strokeRect(s.x - w / 2 - 3, s.y - 3, w + 6, h + 6);
       octx.fillStyle = '#ffd0c0'; octx.font = '700 11px system-ui';
-      octx.fillText(`BIO-SHIELD · hold ${points.length - playerPointCount()} more relay${points.length - playerPointCount() === 1 ? '' : 's'}`, s.x, s.y - 6);
+      if (!(camp.m && camp.m.story)) octx.fillText(`BIO-SHIELD · hold ${points.length - playerPointCount()} more relay${points.length - playerPointCount() === 1 ? '' : 's'}`, s.x, s.y - 6);
     }
     if (e.armorT > 0) { octx.fillStyle = '#7fb8ff'; octx.fillRect(s.x - w / 2, s.y + h + 1, w, 2); }
     if (e.stunT > 0) { octx.font = '14px system-ui'; octx.fillText('💫', s.x, s.y - 6); }
@@ -3170,6 +3211,8 @@ function drawMinimap() {
     mctx.strokeStyle = hex(pointColor(p));
     mctx.beginPath(); mctx.arc(X(p.x), X(p.z), POINT_R * s, 0, Math.PI * 2); mctx.stroke();
   }
+  const mk = storyMarker();
+  if (mk) { mctx.fillStyle = '#5fd0ff'; mctx.save(); mctx.translate(X(mk.x), X(mk.z)); mctx.rotate(Math.PI / 4); mctx.fillRect(-4, -4, 8, 8); mctx.restore(); }
   mctx.lineWidth = 1;
   for (const e of entities) {
     if (e.dead) continue;
@@ -3282,10 +3325,10 @@ function simulate(simDt, dt) {
 // Everything lives in localStorage; the page reloads between missions so each one starts from a clean world.
 const CAMP_KEY = 'hivefall.campaign';
 const MISSIONS = [
-  { id: 'touchdown', name: 'Touchdown', where: 'Landing zone, north ridge', kind: 'live', squad: 4, ore: 40,
-    goal: { type: 'relays' }, goalText: 'Capture all three relays A, B and C',
-    twist: 'Light resistance: swarm waves come slower', waveMul: 1.6, firstWave: 30, tyrantAt: 9999,
-    brief: 'The colony went dark three days ago. Get boots on the ground and take the relays so we can call the fleet.' },
+  { id: 'crash', name: 'Crash Site', where: 'Kepler canyons', kind: 'live', story: 'crash', squad: 4, ore: 0,
+    goal: { type: 'story' }, goalText: 'Fight through the canyons to the colony relay and find the survivor',
+    twist: 'Story mission with checkpoints: if your squad is wiped out, you restart from the last one. No reinforcements.',
+    brief: 'The colony went dark three days ago. On approach, something hit our dropship. We are going down in the canyons, miles from anywhere.' },
   { id: 'holdline', name: 'Hold the Line', where: 'Refinery approach', kind: 'tactics', squad: 6, ore: 80,
     goal: { type: 'rounds', n: 6 }, goalText: 'Keep the outpost standing for 6 rounds',
     twist: 'Swarm surge: two extra aliens every round', surge: 2, tyrantEvery: 99,
@@ -3406,16 +3449,27 @@ tapButton($('btnCampReset'), () => {
   if (!confirm('Start a new campaign? Your squad and progress will be lost.')) return;
   campState = campNew(); campSel = 0; campPick = null; renderCampaign();
 });
-tapButton($('btnLaunch'), () => launchMission(campSel, campPick));
+tapButton($('btnLaunch'), () => relaunch(campSel, campPick, 0));
+// every mission starts from a fresh page, so story missions can build their own map (and checkpoints can restart cleanly)
+function relaunch(i, pick, checkpoint) {
+  try { sessionStorage.setItem('hivefall.launch', JSON.stringify({ mission: i, pick, checkpoint, story: MISSIONS[i].story || null })); } catch (e) { launchMission(i, pick, checkpoint); return; }
+  location.reload();
+}
 
-function launchMission(i, pick) {
+function launchMission(i, pick, checkpoint = 0) {
   const m = MISSIONS[i];
-  camp.m = m; camp.idx = i; camp.t = 0; camp.done = false;
+  camp.m = m; camp.idx = i; camp.t = 0; camp.done = false; camp.pick = pick;
   $('camp').classList.add('hidden');
   // swap the default squad for the marines you picked
   for (const e of entities) if (e.team === PLAYER && !e.isBase && !e.isTower) { e.dead = true; scene.remove(e.mesh); }
   entities = entities.filter(e => !e.dead);
-  const spots = [[-3, 17], [3, 17], [-1, 17], [1, 17], [-2, 19], [2, 19], [0, 19], [-4, 19]];
+  let spots = [[-3, 17], [3, 17], [-1, 17], [1, 17], [-2, 19], [2, 19], [0, 19], [-4, 19]];
+  if (m.story) { // the swarm here is scripted: clear the default aliens and start at the checkpoint
+    for (const e of entities) if (e.team === ENEMY && !e.isBase) { e.dead = true; scene.remove(e.mesh); }
+    entities = entities.filter(e => !e.dead);
+    const [cx, cz] = STORIES[m.story][checkpoint].cp;
+    spots = [[-1, 0], [1, 0], [0, 1.5], [-1.5, 1.5], [1.5, 1.5], [0, -1.5], [-2, -1], [2, -1]].map(([a, b]) => [cx + a * 1.2, cz + b * 1.2]);
+  }
   camp.deployed = [];
   pick.forEach((id, k) => {
     const r = campState.roster.find(x => x.id === id); if (!r) return;
@@ -3430,6 +3484,7 @@ function launchMission(i, pick) {
     game.cp = m.ore; waveTimer = m.firstWave || 16; eliteTimer = m.tyrantAt || 100;
     startGame();
   }
+  if (m.story) { storyStart(checkpoint); return; }
   setTimeout(() => radio(`Mission ${i + 1}: ${m.name}. ${m.goalText}.`, 'good'), m.kind === 'tactics' ? 3200 : 2600);
 }
 function applyRank(u, r) {
@@ -3450,6 +3505,7 @@ function campaignTick(dt) {
     scene.fog.near = Math.max(2, d + m.fog[0] - (d ? 10 : 0)); scene.fog.far = d + m.fog[1] - (d ? 14 : 0);
   }
   const g = m.goal;
+  if (g.type === 'story') storyTick(dt);
   if (g.type === 'relays' && points.every(p => p.owner === PLAYER)) campaignWin('All three relays are ours. The fleet has a signal.');
   if (g.type === 'time' && camp.t >= g.t) campaignWin('The storm passes and the dropship lands. Outpost held.');
   if (g.type === 'rounds' && tac.on && tac.phase === 'plan' && tac.round > g.n) campaignWin(`The refinery crews are out. ${g.n} rounds held.`);
@@ -3463,6 +3519,7 @@ function campaignObjective() {
   if (g.type === 'rounds') txt = `Round ${Math.min(tac.round, g.n)}/${g.n}`;
   if (g.type === 'tyrant') txt = entities.some(e => e.elite && !e.dead) ? 'Kill the Tyrant!' : `Tyrant in ${Math.max(0, Math.ceil(eliteTimer))}s`;
   if (g.type === 'hive') txt = enemyBase.shield ? 'Drop the shield' : 'Destroy the hive!';
+  if (g.type === 'story') txt = storyGoal();
   return `<span class="chip obj">🎯 ${txt}</span>`;
 }
 function campaignWin(text) { if (!camp.done) endGame(true, text); }
@@ -3509,8 +3566,132 @@ function campaignEnd(won) {
     html: `<ul class="debrief">${lines.join('')}</ul>${recruits.length ? `<p class="recruits">New recruits: ${recruits.map(callsign).join(', ')}</p>` : ''}`,
   };
 }
+tapButton($('btnRetryCp'), () => relaunch(camp.idx, camp.pick, story.checkpoint));
 tapButton($('btnToMap'), () => { try { sessionStorage.setItem('hivefall.openMap', '1'); } catch (e) { /* ignore */ } location.reload(); });
+if (LAUNCH) setTimeout(() => { if (!campState) campState = campNew(); launchMission(LAUNCH.mission, LAUNCH.pick, LAUNCH.checkpoint || 0); }, 0);
 try { if (sessionStorage.getItem('hivefall.openMap')) { sessionStorage.removeItem('hivefall.openMap'); openCampaign(); } } catch (e) { /* ignore */ }
+
+// ---------------------------------------------------------------- story missions: scripted objectives, checkpoints, radio dialogue and plot twists
+// Each step has a checkpoint position (cp: where the squad restarts), an objective and a script that runs when it begins.
+// Finish conditions: reach a spot (at + r), clear the area around it (clear), reboot a relay (relay), or survive (survive seconds).
+const STORIES = {
+  crash: [
+    { name: 'Crash site', cp: [0, 21], at: [-16, 13], r: 4.5, goal: 'Reach checkpoint Alpha',
+      run() {
+        say([['Pilot', 'Mayday, mayday! We are going down!'], ['Sgt', 'Everyone out, form up on me. Check your gear.'],
+          ['Command', 'Your only way to the colony is the canyon to the west. Move to checkpoint Alpha.']]);
+        foes([['trooper', -14, 4], ['trooper', -12, 5], ['trooper', -16, 6]], 'idle');
+      } },
+    { name: 'Checkpoint Alpha', cp: [-16, 12], at: [14, -2], r: 6, clear: 11, goal: 'Clear the mining camp',
+      run() {
+        say([['Command', 'Checkpoint Alpha. Your progress is saved.'], ['Ranger', 'Tracks everywhere. Something dragged equipment out of here.'],
+          ['Command', 'Mining camp to the east. Clear it. There could be survivors.']]);
+        foes([['trooper', 12, -6], ['trooper', 16, -3], ['heavy', 14, 2], ['sniper', 19, -5], ['sniper', 9, 0]], 'idle');
+      } },
+    { name: 'Checkpoint Bravo', cp: [12, -1], at: [2, -15], r: 5, goal: 'Reach the comms relay',
+      run() {
+        say([['Command', 'Checkpoint Bravo. Camp clear?'], ['Sgt', 'Clear. No survivors. Just empty bunks.'],
+          ['???', '...this is Ada Brecht at the north relay... please, they are everywhere... please hurry...'],
+          ['Sgt', 'You heard her. Move up to the relay, double time.']]);
+        foes([['trooper', 19, -13], ['trooper', 17, -16], ['sniper', 8, -19], ['trooper', -6, -18]], 'idle');
+      } },
+    { name: 'The relay', cp: [12, -13], relay: 0.35, goal: 'Drop in and reboot the relay: stand on it', marker: 'relay',
+      run() {
+        say([['Command', 'Checkpoint Charlie. Saved.'], ['Sgt', 'Nobody here. Where is Brecht?'],
+          ['Command', 'Reboot the relay so the fleet can find you. Someone has to drop in and stand on it.']]);
+      } },
+    { name: 'Ambush', twist: true, survive: 45, goal: 'Survive until the relay is back online', marker: 'relay',
+      run() {
+        say([['Ranger', 'Sarge... the message. Brecht\'s message. It\'s a recording.'], ['Command', 'Confirmed. It has been looping for three days.'],
+          ['Sgt', 'It was never a survivor. It\'s a LURE! Contacts, all around us!']], 1.6);
+        twistBanner('IT WAS A TRAP');
+        const ring = [[15, -14], [16, -19], [10, -21], [-6, -21], [-11, -18], [-11, -12], [-5, -11], [9, -11], [13, -11], [19, -11], [4, -21]]
+          .map(([x, z], k) => [k % 4 === 3 ? 'sniper' : k % 5 === 2 ? 'heavy' : 'trooper', x, z]);
+        setTimeout(() => { for (const [, x, z] of ring) smoke(x, 0.5, z, 2, 6); foes(ring, 'hunt'); }, 1800);
+        setTimeout(() => { if (!camp.done) { say([['Command', 'Something big is coming out of the hive. Hold on!']]); foes([['elite', 0, -24]], 'hunt'); } }, 22000);
+      } },
+  ],
+};
+const story = { def: null, step: -1, t: 0, checkpoint: 0, beam: null, queue: [], sayT: 0 };
+function storyStart(checkpoint) {
+  document.body.classList.add('story');
+  story.def = STORIES[camp.m.story]; story.checkpoint = checkpoint;
+  const [cx, cz] = story.def[checkpoint].cp;
+  rts.focus.set(cx, 0, cz - 6);
+  const beam = noRay(new THREE.Mesh(new THREE.CylinderGeometry(0.7, 1.1, 30, 16, 1, true), new THREE.MeshBasicMaterial({
+    color: new THREE.Color(0.4, 1.4, 2.4), transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })));
+  beam.position.y = 15; scene.add(beam); story.beam = beam;
+  storyStep(checkpoint);
+}
+function storyStep(i) {
+  story.step = i; story.t = 0; story.queue = []; story.sayT = 0; // stale lines from the last step are dropped
+  const st = story.def[i];
+  if (st.cp && i > 0) story.checkpoint = i; // reaching a step with a checkpoint saves it
+  st.run();
+}
+function storyMarker() {
+  if (!story.def || story.step < 0 || camp.done) return null;
+  const st = story.def[story.step];
+  if (st.marker === 'relay' || st.relay) return { x: points[0].x, z: points[0].z, name: st.twist ? 'HOLD' : 'Relay' };
+  return st.at ? { x: st.at[0], z: st.at[1], name: st.clear ? 'Camp' : story.def[story.step + 1] ? story.def[story.step + 1].name : 'Goal' } : null;
+}
+function storyGoal() {
+  if (!story.def || story.step < 0) return '';
+  const st = story.def[story.step];
+  if (st.survive) return `${st.goal}: ${Math.max(0, Math.ceil(st.survive - story.t))}s`;
+  if (st.relay) return `${st.goal} (${Math.round(Math.max(0, points[0].prog) / st.relay * 100)}%)`;
+  return st.goal;
+}
+function storyTick(dt) {
+  if (!story.def || story.step < 0) return;
+  story.t += dt;
+  // dialogue plays line by line
+  story.sayT -= dt;
+  if (story.queue.length && story.sayT <= 0) { const [who, line, gap] = story.queue.shift(); radio(`${who}: ${line}`, who === '???' ? 'warn' : 'good'); story.sayT = gap; }
+  const mk = storyMarker();
+  if (story.beam) { story.beam.visible = !!mk; if (mk) story.beam.position.set(mk.x, 15, mk.z); }
+  if (!playerUnits().length) { endGame(false, 'The squad was wiped out.'); return; }
+  const st = story.def[story.step];
+  let done = false;
+  if (st.at) {
+    const near = playerUnits().some(u => Math.hypot(u.x - st.at[0], u.z - st.at[1]) < st.r);
+    done = near && (!st.clear || !entities.some(e => !e.dead && e.team === ENEMY && !e.isBase && Math.hypot(e.x - st.at[0], e.z - st.at[1]) < st.clear));
+  }
+  if (st.relay) done = points[0].prog >= st.relay;
+  if (st.survive) done = story.t >= st.survive;
+  if (!done) return;
+  if (story.step + 1 < story.def.length) storyStep(story.step + 1);
+  else campaignWin('The relay is up. The fleet is coming, and now they know: the hive is smart enough to set traps.');
+}
+function say(lines, gap = 2.6) {
+  for (const [who, line] of lines) story.queue.push([who, line, gap + line.length * 0.025]);
+  if (story.sayT > 0.6) story.sayT = 0.6;
+}
+function foes(list, how) {
+  const out = [];
+  for (const [t, x, z] of list) {
+    const u = makeUnit(ENEMY, t, x, z);
+    if (how === 'hunt') { const tgt = possessed || playerUnits()[0]; if (tgt) commandMove([u], tgt.x, tgt.z, 'amove', true); }
+    out.push(u);
+  }
+  return out;
+}
+function twistBanner(text) {
+  const b = $('twist'); if (!b) return;
+  b.textContent = text; b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
+  sfx('boom'); fps.shake = Math.min(0.5, fps.shake + 0.4);
+}
+function storyOverlay() {
+  const mk = storyMarker(); if (!mk) return;
+  const ref = possessed || rts.focus;
+  const d = Math.round(Math.hypot(mk.x - ref.x, mk.z - ref.z));
+  const sp = toScreen(mk.x, 3.2, mk.z);
+  if (sp.behind) return;
+  octx.textAlign = 'center'; octx.font = '800 13px Rajdhani, system-ui';
+  octx.lineWidth = 4; octx.strokeStyle = 'rgba(0,0,0,.75)';
+  const txt = `▼ ${mk.name.toUpperCase()} · ${d}m`;
+  octx.strokeText(txt, sp.x, sp.y); octx.fillStyle = '#7fe0ff'; octx.fillText(txt, sp.x, sp.y);
+}
 
 setupWorld();
 let last = performance.now();
@@ -3562,7 +3743,7 @@ requestAnimationFrame(frame);
 
 // debug hook for automated smoke tests
 window.__game = {
-  camp, MISSIONS, openCampaign, launchMission, getCamp: () => campState,
+  camp, MISSIONS, openCampaign, launchMission, getCamp: () => campState, story, rts,
   get mode() { return mode; }, get entities() { return entities; }, get selection() { return selection; },
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
