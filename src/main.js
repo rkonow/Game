@@ -686,7 +686,7 @@ function makeUnit(team, type, x, z) {
   const g = new THREE.Group();
   if (team === PLAYER) buildMarine(u, g, type, team); else buildAlien(u, g, type);
   u.animT = Math.random() * 10;
-  if (type === 'elite') g.scale.setScalar(1.3);
+  if (type === 'elite') { g.scale.setScalar(1.3); if (camp.m && camp.m.tyrantHp) u.hp = u.maxHp = Math.round(u.maxHp * camp.m.tyrantHp); }
   u.baseScale = g.scale.x;
   tagMeshes(g, u);
   const r = t.radius;
@@ -1443,6 +1443,7 @@ function damage(t, amount, src) {
 const cap = s => s[0].toUpperCase() + s.slice(1);
 function kill(e, src) {
   e.dead = true;
+  campaignKill(e, src);
   burst(e.x, e.isBase ? 2 : 1, e.z, e.isBase ? 6 : 1.2, e.isBase ? 0xffaa44 : e.team === PLAYER ? 0xffc080 : 0x9cff3a);
   feathers(e.x, e.z, e.isBase ? (e.team === PLAYER ? 0x9aa0a8 : 0x6aff2a) : e.team === PLAYER ? 0x8a9098 : 0x7aff3a, e.isBase ? 40 : 14);
   sfx(e.isBase ? 'boom' : e.team === PLAYER ? 'quack' : 'bawk', e.x, e.z);
@@ -1676,7 +1677,7 @@ function updateBases(dt) {
     waveTimer -= dt;
     if (waveTimer <= 0) {
       waveNum++;
-      waveTimer = Math.max(16, 26 - waveNum);
+      waveTimer = Math.max(16, 26 - waveNum) * ((camp.m && camp.m.waveMul) || 1);
       const n = Math.min(3 + Math.floor(waveNum * 0.7), 9);
       // send the wave at a point the enemy doesn't own yet, preferring yours
       const targets = points.filter(p => p.owner !== ENEMY);
@@ -2653,7 +2654,7 @@ function updateButtons() {
   const sel = liveSelection();
   const counts = {};
   for (const u of sel) counts[u.type] = (counts[u.type] || 0) + 1;
-  $('selInfo').textContent = sel.length ? `${sel.length} selected · ${Object.entries(counts).map(([t, n]) => `${n} ${NAMES[PLAYER][t].toLowerCase()}`).join(', ')}` : 'No marines selected';
+  $('selInfo').textContent = sel.length === 1 && sel[0].callsign ? `${sel[0].callsign} · ${NAMES[PLAYER][sel[0].type]}` : sel.length ? `${sel.length} selected · ${Object.entries(counts).map(([t, n]) => `${n} ${NAMES[PLAYER][t].toLowerCase()}`).join(', ')}` : 'No marines selected';
   renderPortraits(sel);
   $('btnAMove').classList.toggle('armed', amoveArmed);
 }
@@ -2664,7 +2665,7 @@ let portraitUnits = [];
 function renderPortraits(sel) {
   const box = $('portraits'); if (!box) return;
   portraitUnits = sel.slice(0, 24);
-  box.innerHTML = portraitUnits.map((u, i) => `<button class="pt${u === tac.hero ? ' hero' : ''}" data-i="${i}" title="${nameOf(u)}"><i>${ICONS[u.type] || '🐤'}</i>${(u.lvl || 1) > 1 ? `<b>${'★'.repeat(u.lvl - 1)}</b>` : ''}<em><s style="width:${Math.round(Math.max(0, u.hp / u.maxHp) * 100)}%"></s></em></button>`).join('')
+  box.innerHTML = portraitUnits.map((u, i) => `<button class="pt${u === tac.hero ? ' hero' : ''}" data-i="${i}" title="${u.callsign || nameOf(u)}"><i>${ICONS[u.type] || '🐤'}</i>${u.rank ? `<u>${['', '▲', '▲▲', '★'][u.rank]}</u>` : ''}${(u.lvl || 1) > 1 ? `<b>${'★'.repeat(u.lvl - 1)}</b>` : ''}<em><s style="width:${Math.round(Math.max(0, u.hp / u.maxHp) * 100)}%"></s></em></button>`).join('')
     + (sel.length > 24 ? `<span class="more">+${sel.length - 24}</span>` : '');
   document.body.classList.toggle('hasSel', sel.length > 0);
 }
@@ -2695,7 +2696,7 @@ function renderTopbar(dt) {
   const nest = p => `<span class="nest ${p.owner === PLAYER ? 'mine' : p.owner === ENEMY ? 'theirs' : ''}${p.contested ? ' fight' : ''}">${p.name}</span>`;
   const bar = (label, k, cls, extra = '') => `<span class="base ${cls}"><b>${label}</b><em><s style="width:${Math.round(k * 100)}%"></s></em>${extra}</span>`;
   const timer = tac.on ? `<span class="chip">👾 ${countUnits(ENEMY)} vs 🪖 ${countUnits(PLAYER)}</span>` : `<span class="chip">👾 wave in ${Math.ceil(waveTimer)}s</span>`;
-  $('status').innerHTML = `<span class="nests">${points.map(nest).join('')}</span>${bar('Outpost', pb, 'ours')}${bar('Hive', eb, 'enemy', enemyBase.shield ? '<i title="Bio-shield: hold all 3 relays">🛡</i>' : '<i title="Cracked!">💥</i>')}${timer}`;
+  $('status').innerHTML = `<span class="nests">${points.map(nest).join('')}</span>${bar('Outpost', pb, 'ours')}${bar('Hive', eb, 'enemy', enemyBase.shield ? '<i title="Bio-shield: hold all 3 relays">🛡</i>' : '<i title="Cracked!">💥</i>')}${timer}${campaignObjective()}`;
 }
 
 const setLabel = (id, text) => { const b = $(id), sp = b && b.querySelector('span'); if (sp) sp.textContent = text; else if (b) b.textContent = text; };
@@ -2731,6 +2732,12 @@ function endGame(won, text) {
   document.body.classList.remove('fps', 'scoped');
   $('overTitle').textContent = won ? 'Hive destroyed!' : 'Outpost overrun.';
   $('overText').textContent = text || (won ? `The hive burned after ${waveNum} waves. The colony is safe.` : `The swarm overran the outpost during wave ${waveNum}.`);
+  if (camp.m) { // campaign: write the results into the squad and show the debrief
+    const d = campaignEnd(won);
+    $('overTitle').textContent = d.title;
+    $('overDebrief').innerHTML = d.html;
+    $('btnToMap').classList.remove('hidden'); $('btnRestart').classList.add('hidden');
+  }
   setTimeout(() => $('over').classList.remove('hidden'), 900);
 }
 
@@ -2794,14 +2801,15 @@ function startPlan() {
     const income = 20 + 15 * held;
     game.cp = Math.min(CP_MAX, game.cp + income);
     for (const e of entities) if (!e.dead && e.team === PLAYER && !e.isBase) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.25);
-    const n = Math.min(2 + tac.round, ENEMY_CAP - countUnits(ENEMY));
+    const n = Math.min(2 + tac.round + ((camp.m && camp.m.surge) || 0), ENEMY_CAP - countUnits(ENEMY));
     for (let i = 0; i < n; i++) {
       const type = i % 4 === 3 ? 'sniper' : i % 3 === 2 ? 'heavy' : 'trooper';
       const h = makeUnit(ENEMY, type, (Math.random() - 0.5) * 10, -20 - Math.random() * 2);
       if (tac.round >= 4) { h.maxHp = h.hp = Math.round(h.maxHp * (1 + (tac.round - 3) * 0.12)); }
     }
-    if (tac.round % 5 === 0 && !entities.some(e => e.elite && !e.dead)) makeUnit(ENEMY, 'elite', 0, -20);
-    radio(`+${income} ore (${held} relay${held === 1 ? '' : 's'} held) · ${n} new aliens${tac.round % 5 === 0 ? ' and the Hive Tyrant' : ''}`, 'good');
+    const tyr = tac.round % ((camp.m && camp.m.tyrantEvery) || 5) === 0;
+    if (tyr && !entities.some(e => e.elite && !e.dead)) makeUnit(ENEMY, 'elite', 0, -20);
+    radio(`+${income} ore (${held} relay${held === 1 ? '' : 's'} held) · ${n} new aliens${tyr ? ' and the Hive Tyrant' : ''}`, 'good');
     if (!playerUnits().length && game.cp < COSTS.trooper) { endGame(false, `No marines left and no ore to deploy more, round ${tac.round}.`); return; }
   }
   document.body.classList.add('plan'); document.body.classList.remove('live');
@@ -3196,7 +3204,7 @@ function updateHud(dt) {
   if (possessed) {
     const k = Math.max(0, possessed.hp / possessed.maxHp);
     $('fpsHpFill').style.width = `${k * 100}%`;
-    $('fpsHpText').textContent = `${nameOf(possessed).toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  hero`;
+    $('fpsHpText').textContent = `${(possessed.callsign || nameOf(possessed)).toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  hero`;
     const kit = KITS[possessed.type], cds = possessed.cds || [0, 0];
     const lab = (i, key) => {
       const b = $(i ? 'btnAbility2' : 'btnAbility');
@@ -3269,6 +3277,241 @@ function simulate(simDt, dt) {
   entities = entities.filter(e => !e.dead);
   selection = selection.filter(e => !e.dead);
 }
+// ---------------------------------------------------------------- campaign: five missions across the Kepler sector, with a squad that remembers
+// Marines have names, earn rank from kills and missions, and a marine who falls in a mission is gone for good.
+// Everything lives in localStorage; the page reloads between missions so each one starts from a clean world.
+const CAMP_KEY = 'hivefall.campaign';
+const MISSIONS = [
+  { id: 'touchdown', name: 'Touchdown', where: 'Landing zone, north ridge', kind: 'live', squad: 4, ore: 40,
+    goal: { type: 'relays' }, goalText: 'Capture all three relays A, B and C',
+    twist: 'Light resistance: swarm waves come slower', waveMul: 1.6, firstWave: 30, tyrantAt: 9999,
+    brief: 'The colony went dark three days ago. Get boots on the ground and take the relays so we can call the fleet.' },
+  { id: 'holdline', name: 'Hold the Line', where: 'Refinery approach', kind: 'tactics', squad: 6, ore: 80,
+    goal: { type: 'rounds', n: 6 }, goalText: 'Keep the outpost standing for 6 rounds',
+    twist: 'Swarm surge: two extra aliens every round', surge: 2, tyrantEvery: 99,
+    brief: 'The refinery crews are evacuating through our outpost. Buy them six rounds. Turrets are your friend.' },
+  { id: 'hunt', name: 'Tyrant Hunt', where: 'Crashed freighter', kind: 'live', squad: 5, ore: 60,
+    goal: { type: 'tyrant' }, goalText: 'Kill the Hive Tyrant',
+    twist: 'The Tyrant comes out after 45 seconds, with 50% more health', waveMul: 1.2, firstWave: 20, tyrantAt: 45, tyrantHp: 1.5,
+    brief: 'Something big is directing the swarm. Draw it out and put it down. Drop in and fight it yourself if you have to.' },
+  { id: 'blackout', name: 'Blackout', where: 'Habitat domes', kind: 'live', squad: 6, ore: 60,
+    goal: { type: 'time', t: 180 }, goalText: 'Survive for 3 minutes',
+    twist: 'Dust storm: you can barely see past your squad', fog: [6, 34], waveMul: 0.85, firstWave: 12, tyrantAt: 120,
+    brief: 'A storm is rolling over the domes and the swarm moves with it. Hold the outpost until the dropship can land.' },
+  { id: 'hivefall', name: 'Hivefall', where: 'The main hive', kind: 'tactics', squad: 6, ore: 120,
+    goal: { type: 'hive' }, goalText: 'Break the bio-shield and destroy the hive',
+    twist: 'The Hive Tyrant joins the fight every 3 rounds', surge: 1, tyrantEvery: 3,
+    brief: 'This is it. Hold the relays, drop the shield and burn the hive. Bring your best marines home.' },
+];
+const SURNAMES = ['Reyes', 'Okafor', 'Lindqvist', 'Tanaka', 'Moreau', 'Brandt', 'Kowalski', 'Haddad', 'Nakamura', 'Petrov', 'Mbeki', 'Silva',
+  "O'Neill", 'Castillo', 'Novak', 'Adeyemi', 'Larsen', 'Choi', 'Duarte', 'Varga', 'Ito', 'Achterberg', 'Mensah', 'Rossi', 'Kaur', 'Fischer', 'Quinn', 'Sato'];
+const RANKS = [{ tag: 'Pvt', name: 'Private', xp: 0 }, { tag: 'Cpl', name: 'Corporal', xp: 5 }, { tag: 'Sgt', name: 'Sergeant', xp: 12 }, { tag: 'Lt', name: 'Lieutenant', xp: 22 }];
+const rankOf = xp => { let r = 0; RANKS.forEach((k, i) => { if (xp >= k.xp) r = i; }); return r; };
+const callsign = m => `${RANKS[rankOf(m.xp)].tag}. ${m.name}`;
+const chevrons = r => ['', '▲', '▲▲', '★'][r] || '';
+const camp = { m: null, idx: -1, t: 0, deployed: [], done: false };
+
+function campLoad() {
+  try { const s = JSON.parse(localStorage.getItem(CAMP_KEY)); if (s && s.v === 1) return s; } catch (e) { /* fresh */ }
+  return null;
+}
+function campSave(s) { try { localStorage.setItem(CAMP_KEY, JSON.stringify(s)); } catch (e) { /* storage blocked: progress lasts this page only */ } }
+function freshName(s) {
+  const used = new Set(s.roster.map(m => m.name));
+  const free = SURNAMES.filter(n => !used.has(n));
+  return free.length ? free[Math.floor(Math.random() * free.length)] : SURNAMES[s.nextId % SURNAMES.length] + ' ' + (2 + Math.floor(s.nextId / SURNAMES.length));
+}
+function recruit(s, type) {
+  const m = { id: s.nextId++, name: freshName(s), type, xp: 0, kills: 0, missions: 0, status: 'active' };
+  s.roster.push(m);
+  return m;
+}
+function topUp(s) { // keep at least six marines, with one juggernaut and one ranger, so a bad mission never ends the campaign
+  const active = () => s.roster.filter(m => m.status === 'active');
+  const added = [];
+  while (active().length < 6) {
+    const a = active();
+    const type = !a.some(m => m.type === 'heavy') ? 'heavy' : !a.some(m => m.type === 'sniper') ? 'sniper' : 'trooper';
+    added.push(recruit(s, type));
+  }
+  return added;
+}
+function campNew() {
+  const s = { v: 1, unlocked: 0, won: [], roster: [], nextId: 1, log: [] };
+  for (const t of ['trooper', 'trooper', 'trooper', 'heavy', 'sniper', 'trooper']) recruit(s, t);
+  campSave(s);
+  return s;
+}
+let campState = campLoad();
+
+// ---- sector map + briefing
+let campSel = 0, campPick = null;
+function openCampaign() {
+  if (!campState) campState = campNew();
+  $('menu').classList.add('hidden'); $('over').classList.add('hidden');
+  $('camp').classList.remove('hidden');
+  campSel = Math.min(campState.unlocked, MISSIONS.length - 1);
+  campPick = null;
+  renderCampaign();
+}
+function defaultPick(m) {
+  const active = campState.roster.filter(r => r.status === 'active').sort((a, b) => b.xp - a.xp);
+  const pick = [];
+  for (const t of ['heavy', 'sniper']) { const r = active.find(x => x.type === t); if (r && pick.length < m.squad) pick.push(r.id); }
+  for (const r of active) if (pick.length < m.squad && !pick.includes(r.id)) pick.push(r.id);
+  return pick;
+}
+function renderCampaign() {
+  const s = campState, m = MISSIONS[campSel];
+  if (!campPick) campPick = defaultPick(m);
+  const nodes = MISSIONS.map((x, i) => {
+    const locked = i > s.unlocked, won = s.won.includes(x.id);
+    return `<button class="node${i === campSel ? ' on' : ''}${locked ? ' locked' : ''}${won ? ' won' : ''}" data-i="${i}" ${locked ? 'disabled' : ''}>
+      <b>${won ? '✓' : locked ? '🔒' : i + 1}</b><span>${x.name}</span></button>`;
+  }).join('<i class="link"></i>');
+  const active = s.roster.filter(r => r.status === 'active').sort((a, b) => b.xp - a.xp);
+  const fallen = s.roster.filter(r => r.status === 'kia');
+  const row = r => {
+    const rk = rankOf(r.xp), on = campPick.includes(r.id);
+    const next = RANKS[rk + 1];
+    return `<button class="mar${on ? ' on' : ''}" data-id="${r.id}"><i>${ICONS[r.type]}</i><span><b>${callsign(r)}</b><small>${NAMES[PLAYER][r.type]} · ${r.kills} kills · ${r.missions} missions${next ? ` · ${next.xp - r.xp} xp to ${next.tag}` : ''}</small></span><em>${chevrons(rk)}</em></button>`;
+  };
+  $('campMap').innerHTML = nodes;
+  $('campBrief').innerHTML = `
+    <h2>${campSel + 1}. ${m.name} <small>${m.where}</small></h2>
+    <p class="brief">${m.brief}</p>
+    <p class="goal"><b>🎯 ${m.goalText}</b></p>
+    <p class="twist">⚠ ${m.twist}</p>
+    <p class="kind">${m.kind === 'tactics' ? 'Tactics: plan with the battle paused, then 20-second live rounds' : 'Live battle: real time, drop in any time'} · start with 💠 ${m.ore}</p>
+    <h3>Squad <small>${campPick.length} / ${m.squad} deployed · tap to swap</small></h3>
+    <div class="roster">${active.map(row).join('')}</div>
+    ${fallen.length ? `<p class="fallen">Fallen: ${fallen.map(r => `${callsign(r)} (${r.diedIn})`).join(' · ')}</p>` : ''}`;
+  $('btnLaunch').disabled = !campPick.length;
+}
+$('campMap').addEventListener('click', e => {
+  const b = e.target.closest('.node'); if (!b || b.disabled) return;
+  campSel = +b.dataset.i; campPick = null; renderCampaign();
+});
+$('campBrief').addEventListener('click', e => {
+  const b = e.target.closest('.mar'); if (!b) return;
+  const id = +b.dataset.id, m = MISSIONS[campSel];
+  if (campPick.includes(id)) campPick = campPick.filter(x => x !== id);
+  else if (campPick.length < m.squad) campPick.push(id);
+  else toast(`This mission takes ${m.squad} marines`, 1.2);
+  renderCampaign();
+});
+tapButton($('btnCamp'), openCampaign);
+tapButton($('btnCampBack'), () => { $('camp').classList.add('hidden'); $('menu').classList.remove('hidden'); });
+tapButton($('btnCampReset'), () => {
+  if (!confirm('Start a new campaign? Your squad and progress will be lost.')) return;
+  campState = campNew(); campSel = 0; campPick = null; renderCampaign();
+});
+tapButton($('btnLaunch'), () => launchMission(campSel, campPick));
+
+function launchMission(i, pick) {
+  const m = MISSIONS[i];
+  camp.m = m; camp.idx = i; camp.t = 0; camp.done = false;
+  $('camp').classList.add('hidden');
+  // swap the default squad for the marines you picked
+  for (const e of entities) if (e.team === PLAYER && !e.isBase && !e.isTower) { e.dead = true; scene.remove(e.mesh); }
+  entities = entities.filter(e => !e.dead);
+  const spots = [[-3, 17], [3, 17], [-1, 17], [1, 17], [-2, 19], [2, 19], [0, 19], [-4, 19]];
+  camp.deployed = [];
+  pick.forEach((id, k) => {
+    const r = campState.roster.find(x => x.id === id); if (!r) return;
+    const [x, z] = spots[k % spots.length];
+    const u = makeUnit(PLAYER, r.type, x, z);
+    applyRank(u, r);
+    camp.deployed.push(u);
+  });
+  if (m.fog) { scene.traverse(o => { if (o.material === skyMat) o.visible = false; }); scene.fog.near = m.fog[0]; scene.fog.far = m.fog[1]; scene.background.setHex(0x8a6a58); scene.fog.color.setHex(0x8a6a58); }
+  if (m.kind === 'tactics') { startTactics(); game.cp = m.ore; }
+  else {
+    game.cp = m.ore; waveTimer = m.firstWave || 16; eliteTimer = m.tyrantAt || 100;
+    startGame();
+  }
+  setTimeout(() => radio(`Mission ${i + 1}: ${m.name}. ${m.goalText}.`, 'good'), m.kind === 'tactics' ? 3200 : 2600);
+}
+function applyRank(u, r) {
+  const rk = rankOf(r.xp);
+  u.rid = r.id; u.callsign = callsign(r); u.rank = rk;
+  const k = 1 + 0.12 * rk;
+  u.maxHp = Math.round(u.maxHp * k); u.hp = u.maxHp;
+  u.dmg *= 1 + 0.1 * rk;
+  if (rk >= 3) u.acc = Math.min(0.95, u.acc + 0.05);
+}
+
+// ---- during a mission
+function campaignTick(dt) {
+  const m = camp.m; if (!m || camp.done || mode === 'over') return;
+  if (!(tac.on && tac.phase === 'plan')) camp.t += dt;
+  if (m.fog) { // the storm closes in around the camera, wherever it is
+    const d = mode === 'fps' ? 0 : camera.position.distanceTo(rts.focus);
+    scene.fog.near = Math.max(2, d + m.fog[0] - (d ? 10 : 0)); scene.fog.far = d + m.fog[1] - (d ? 14 : 0);
+  }
+  const g = m.goal;
+  if (g.type === 'relays' && points.every(p => p.owner === PLAYER)) campaignWin('All three relays are ours. The fleet has a signal.');
+  if (g.type === 'time' && camp.t >= g.t) campaignWin('The storm passes and the dropship lands. Outpost held.');
+  if (g.type === 'rounds' && tac.on && tac.phase === 'plan' && tac.round > g.n) campaignWin(`The refinery crews are out. ${g.n} rounds held.`);
+}
+function campaignObjective() {
+  const m = camp.m; if (!m) return '';
+  const g = m.goal;
+  let txt = m.goalText;
+  if (g.type === 'relays') txt = `Relays ${points.filter(p => p.owner === PLAYER).length}/3`;
+  if (g.type === 'time') txt = `Survive ${Math.max(0, Math.ceil(g.t - camp.t))}s`;
+  if (g.type === 'rounds') txt = `Round ${Math.min(tac.round, g.n)}/${g.n}`;
+  if (g.type === 'tyrant') txt = entities.some(e => e.elite && !e.dead) ? 'Kill the Tyrant!' : `Tyrant in ${Math.max(0, Math.ceil(eliteTimer))}s`;
+  if (g.type === 'hive') txt = enemyBase.shield ? 'Drop the shield' : 'Destroy the hive!';
+  return `<span class="chip obj">🎯 ${txt}</span>`;
+}
+function campaignWin(text) { if (!camp.done) endGame(true, text); }
+function campaignKill(e, src) {
+  if (!camp.m) return;
+  if (e.team === ENEMY && src && src.rid) src.kills = (src.kills || 0) + 1;
+  if (e.team === ENEMY && e.elite && camp.m.goal.type === 'tyrant') setTimeout(() => campaignWin('The Hive Tyrant is dead. The swarm is leaderless.'), 1200);
+  if (e.team === PLAYER && e.callsign) radio(`${e.callsign} is down. KIA.`, 'warn');
+}
+
+// ---- debrief: write the results into the roster and show what happened to everyone
+function campaignEnd(won) {
+  camp.done = true;
+  const s = campState, m = camp.m;
+  const lines = [];
+  for (const u of camp.deployed) {
+    const r = s.roster.find(x => x.id === u.rid); if (!r) continue;
+    const kills = u.kills || 0;
+    if (u.dead) {
+      r.status = 'kia'; r.diedIn = m.name; r.kills += kills;
+      lines.push(`<li class="kia"><i>${ICONS[r.type]}</i><b>${callsign(r)}</b><span>${kills} kills · killed in action</span></li>`);
+      continue;
+    }
+    const before = rankOf(r.xp);
+    r.kills += kills; r.missions++;
+    r.xp += kills + 2 + (won ? 2 : 0);
+    const after = rankOf(r.xp);
+    lines.push(`<li><i>${ICONS[r.type]}</i><b>${callsign(r)}</b><span>${kills} kills${after > before ? ` · <em>promoted to ${RANKS[after].name}!</em>` : ''}</span></li>`);
+  }
+  // reinforcements you deployed during the mission and who made it join the roster
+  const fresh = entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower && !e.rid);
+  for (const u of fresh.slice(0, Math.max(0, 10 - s.roster.filter(r => r.status === 'active').length))) {
+    const r = recruit(s, u.type); r.kills = u.kills || 0; r.xp = r.kills + 2; r.missions = 1;
+    lines.push(`<li class="new"><i>${ICONS[r.type]}</i><b>${callsign(r)}</b><span>reinforcement, joins the squad</span></li>`);
+  }
+  if (won && !s.won.includes(m.id)) s.won.push(m.id);
+  if (won) s.unlocked = Math.max(s.unlocked, Math.min(MISSIONS.length - 1, camp.idx + 1));
+  const recruits = topUp(s);
+  s.log.push({ m: m.id, won, at: Date.now() });
+  campSave(s);
+  const finale = won && camp.idx === MISSIONS.length - 1;
+  return {
+    title: finale ? 'Campaign complete!' : won ? 'Mission accomplished' : 'Mission failed',
+    html: `<ul class="debrief">${lines.join('')}</ul>${recruits.length ? `<p class="recruits">New recruits: ${recruits.map(callsign).join(', ')}</p>` : ''}`,
+  };
+}
+tapButton($('btnToMap'), () => { try { sessionStorage.setItem('hivefall.openMap', '1'); } catch (e) { /* ignore */ } location.reload(); });
+try { if (sessionStorage.getItem('hivefall.openMap')) { sessionStorage.removeItem('hivefall.openMap'); openCampaign(); } } catch (e) { /* ignore */ }
+
 setupWorld();
 let last = performance.now();
 function frame(now) {
@@ -3308,6 +3551,7 @@ function frame(now) {
   updateAmbient(dt, now);
   updateCamera(dt);
   if (window.__camOverride) window.__camOverride(camera);
+  if (camp.m) campaignTick(dt);
   if (mode !== 'menu') updateHud(dt); else if (toastTimer > 0) toastTimer -= dt;
   renderFrame(dt);
   drawOverlay();
@@ -3318,6 +3562,7 @@ requestAnimationFrame(frame);
 
 // debug hook for automated smoke tests
 window.__game = {
+  camp, MISSIONS, openCampaign, launchMission, getCamp: () => campState,
   get mode() { return mode; }, get entities() { return entities; }, get selection() { return selection; },
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,

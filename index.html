@@ -101,6 +101,7 @@
       </div>
     </div>
     <p class="roles">Marine: frag grenade, combat roll, ★ drone swarm · Juggernaut: energy wall, shield charge, ★ shockwave · Ranger: scope, jump jet, ★ recon scan · Watch out for the <b>Hive Tyrant</b> · Alerts have a <b>Drop in</b> button that takes you straight there</p>
+    <div class="campCta"><button id="btnCamp" class="accent big">▶ Campaign</button><p>Five missions across the Kepler sector with a squad that remembers: marines earn rank, and the ones who fall are gone for good.</p></div>
     <div class="modes">
       <div><button id="btnStart" class="accent big">Live battle</button><p>Real-time: command and drop in whenever you like. The swarm attacks in waves.</p></div>
       <div><button id="btnStartTac" class="accent big">Tactics</button><p>Turn-based: the battle pauses between 20-second live rounds. Reposition, deploy, upgrade and build turrets, then play one ★ hero live. Hold all 3 relays to break the shield, then destroy the hive.</p></div>
@@ -109,11 +110,27 @@
   </div>
 </div>
 
+<div id="camp" class="screen hidden">
+  <div class="card campCard">
+    <h1>KEPLER SECTOR</h1>
+    <p class="sub">Campaign · pick a mission and your squad</p>
+    <div id="campMap"></div>
+    <div id="campBrief"></div>
+    <div class="campBtns">
+      <button id="btnLaunch" class="accent big">Launch mission</button>
+      <button id="btnCampBack" class="gfx">◀ Menu</button>
+      <button id="btnCampReset" class="gfx">New campaign</button>
+    </div>
+  </div>
+</div>
+
 <div id="over" class="screen hidden">
   <div class="card">
     <h1 id="overTitle"></h1>
     <p id="overText"></p>
+    <div id="overDebrief"></div>
     <button id="btnRestart" class="accent big">Play again</button>
+    <button id="btnToMap" class="accent big hidden">Sector map</button>
   </div>
 </div>
 

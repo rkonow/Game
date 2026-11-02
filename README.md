@@ -27,6 +27,20 @@ One loop: **hold the relays, drop the shield, destroy the hive.**
 - The swarm (**Skitters**, armoured **Brutes**, acid-spitting **Spitters**) attacks in growing waves, each heading for a relay, and the **Hive Tyrant** comes out to hunt the marine you're controlling.
 - Marines are smart: they shoot while moving, stop to return fire, go after snipers, dodge grenades, focus the wounded and patch themselves up out of combat.
 
+## Campaign
+
+**Campaign** on the menu opens the Kepler sector map: five missions, unlocked in order, each with its own goal and twist.
+
+| # | Mission | Mode | Goal | Twist |
+|---|---|---|---|---|
+| 1 | Touchdown | Live | Capture all three relays | Waves come slower |
+| 2 | Hold the Line | Tactics | Keep the outpost standing for 6 rounds | Two extra aliens every round |
+| 3 | Tyrant Hunt | Live | Kill the Hive Tyrant | It comes out at 45s with 50% more health |
+| 4 | Blackout | Live | Survive 3 minutes | Dust storm: very short sight lines |
+| 5 | Hivefall | Tactics | Destroy the hive | The Tyrant every 3 rounds |
+
+Your squad persists between missions. Every marine has a name and earns XP from kills and missions: Private → Corporal → Sergeant → Lieutenant, each rank adding health and damage. You pick who deploys in the briefing. **A marine killed in a mission is gone for good**, and the debrief lists kills, promotions and the fallen. Reinforcements you deploy and who survive join the roster, and fresh recruits keep the squad at six. Progress is saved in the browser; **New campaign** starts over.
+
 ## Hero kits (first person)
 
 Each marine you control has two abilities on cooldowns and an ultimate (★) that charges while you deal damage, get kills, capture relays, and slowly over time. Ultimate charge stays on the marine, so in Tactics it carries over between rounds.
