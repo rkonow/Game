@@ -233,3 +233,5 @@ body.tactics.plan .tac-only#btnBuy_turret, body.tactics.plan .tac-only#btnBuy_mo
 }
 #powers button.tac-only { display: none; }
 body.tactics.plan #powers button.tac-only { display: flex; }
+
+#btnGfx.gfx { margin-top: 12px; background: #fff3d0; color: #5a4630; border: 2px solid #d8b98a; border-radius: 12px; font-size: 13px; padding: 6px 14px; }

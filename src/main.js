@@ -5,6 +5,11 @@
 // the command view on new soldiers. Hold all three and the enemy post's shield
 // drops so your army can destroy it.
 import * as THREE from '../vendor/three.module.min.js';
+import { EffectComposer } from '../vendor/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from '../vendor/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from '../vendor/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from '../vendor/jsm/postprocessing/ShaderPass.js';
 
 // ---------------------------------------------------------------- config
 const HALF = 30;            // map spans [-HALF, HALF] on X and Z
@@ -105,6 +110,54 @@ sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
 Object.assign(sun.shadow.camera, { left: -36, right: 36, top: 36, bottom: -36, near: 1, far: 100 });
 scene.add(sun);
 
+// ---------------------------------------------------------------- post-processing: bloom + colour grade + vignette
+// "Fancy" graphics render through a composer. If the device can't keep up, it drops to plain rendering by itself.
+const gfx = { fancy: true, auto: true, slowT: 0, warm: 0 };
+try {
+  const q = new URLSearchParams(location.search).get('fancy');
+  if (q !== null) { gfx.fancy = q !== '0'; gfx.auto = false; }
+  else if (localStorage.getItem('fowl.gfx') === 'fast') gfx.fancy = false;
+} catch (e) { /* storage blocked: keep defaults */ }
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.45, 0.92);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+const gradePass = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uAspect: { value: 1 }, uVig: { value: 0.32 }, uHurt: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uAspect, uVig, uHurt; varying vec2 vUv;
+    void main(){
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      float l = dot(c, vec3(0.299, 0.587, 0.114));
+      c = mix(vec3(l), c, 1.14);                       // a touch more saturated
+      c *= mix(vec3(0.97, 0.99, 1.05), vec3(1.05, 1.0, 0.93), smoothstep(0.2, 0.8, l)); // cool shadows, warm highlights
+      c = (c - 0.5) * 1.05 + 0.5;
+      vec2 d = vUv - 0.5; d.x *= uAspect;
+      float v = smoothstep(0.95, 0.3, length(d));
+      c *= mix(1.0 - uVig, 1.0, v);
+      c = mix(c, vec3(0.9, 0.1, 0.05), (1.0 - v) * uHurt * 0.6);
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+    }`,
+});
+composer.addPass(gradePass);
+function setFancy(on, why, save = true) {
+  gfx.fancy = on;
+  if (save) try { localStorage.setItem('fowl.gfx', on ? 'fancy' : 'fast'); } catch (e) { /* ignore */ }
+  const b = document.getElementById('btnGfx'); if (b) b.textContent = on ? '✨ Graphics: fancy' : '⚡ Graphics: fast';
+  if (why) toast(why, 2.5);
+}
+function renderFrame(dt) {
+  if (!gfx.fancy) { renderer.render(scene, camera); return; }
+  composer.render(dt);
+  // too slow for a few seconds in game? fall back to fast graphics
+  if (gfx.auto && mode !== 'menu') {
+    gfx.warm += dt;
+    if (gfx.warm > 3) { gfx.slowT = dt > 0.042 ? gfx.slowT + dt : Math.max(0, gfx.slowT - dt * 2); }
+    if (gfx.slowT > 4) { gfx.auto = false; setFancy(false, 'Switched to fast graphics for a smoother game', false); }
+  }
+}
+
 // small canvas textures so everything stays procedural
 function canvasTex(w, h, draw, rx = 1, ry = 1) {
   const c = document.createElement('canvas');
@@ -150,6 +203,7 @@ scene.add(outer);
 const noRay = o => { o.raycast = () => {}; return o; };
 
 // dirt lanes from barn to barn, and the duck pond
+let pondMesh = null, pondMaterial = null;
 for (const x of [-17, 0, 17]) {
   const lane = noRay(new THREE.Mesh(new THREE.PlaneGeometry(4.5, 44), toon({ color: 0xa8784a, transparent: true, opacity: 0.6 })));
   lane.rotation.x = -Math.PI / 2; lane.position.set(x, 0.01, 0);
@@ -158,12 +212,15 @@ for (const x of [-17, 0, 17]) {
 }
 {
   const pond = noRay(new THREE.Mesh(new THREE.CircleGeometry(4, 32), toon({ color: 0x4aa8e0, roughness: 0.15, metalness: 0.1 })));
+  pondMesh = pond;
   pond.rotation.x = -Math.PI / 2; pond.scale.set(1.5, 1, 1); pond.position.set(-21, 0.015, 26);
   scene.add(pond);
   const mud = noRay(new THREE.Mesh(new THREE.CircleGeometry(3.2, 24), toon({ color: 0x8a5a3a, roughness: 1 })));
   mud.rotation.x = -Math.PI / 2; mud.scale.set(1.6, 1, 1); mud.position.set(21, 0.015, -26);
   scene.add(mud);
 }
+// big landmarks around the farm: [x, z, clear radius]
+const LANDMARKS = [[-46, -42, 9], [44, -46, 7], [48, 38, 10], [-50, 44, 8], [0, -52, 12], [0, 54, 12], [-56, 0, 8], [57, 4, 8]];
 // scenery outside the play area: trees, sunflowers, a wooden border fence
 {
   const trunkGeo = new THREE.CylinderGeometry(0.3, 0.4, 2, 7), crownGeo = new THREE.IcosahedronGeometry(1.8, 1);
@@ -175,6 +232,7 @@ for (const x of [-17, 0, 17]) {
     const a = Math.random() * Math.PI * 2, r = 34 + Math.random() * 30;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     if (Math.max(Math.abs(x), Math.abs(z)) < 32) continue;
+    if (LANDMARKS.some(([lx, lz, lr]) => Math.hypot(x - lx, z - lz) < lr)) continue;
     const s = 0.8 + Math.random() * 0.8;
     const t = noRay(new THREE.Mesh(trunkGeo, trunkMat)); t.position.set(x, 1 * s, z); t.scale.setScalar(s);
     const c = noRay(new THREE.Mesh(crownGeo, crownMats[i % 3])); c.position.set(x, 2.8 * s, z); c.scale.setScalar(s); c.castShadow = true;
@@ -299,7 +357,130 @@ function updateAmbient(dt, now) {
     b.rotation.y = Math.atan2(Math.cos(t), -Math.sin(t * 0.8) * 0.8);
     const f = Math.sin(now / 45 + u.ph) * 1.1;
     u.l.rotation.y = f; u.r.rotation.y = -f;
+  }  for (const w of windmills) w.rotation.z += dt * 0.9;
+  if (rubberDuck) { const t = now / 1000; rubberDuck.position.set(-21 + Math.sin(t * 0.3) * 2.5, Math.sin(t * 2.2) * 0.06 - 0.05, 26 + Math.cos(t * 0.23) * 1.2); rubberDuck.rotation.set(Math.sin(t * 1.7) * 0.08, t * 0.3 + Math.PI / 2, Math.sin(t * 2.1) * 0.08); }
+  if (balloon) { balloon.position.x += dt * 1.6; balloon.position.y = 30 + Math.sin(now / 3000) * 2; if (balloon.position.x > 120) balloon.position.x = -120; }
+  ambient.smokeT = (ambient.smokeT || 0) - dt;
+  if (ambient.smokeT <= 0) { ambient.smokeT = 0.35; for (const sp of smokeSpots) puff(sp.x, sp.y, sp.z, 0.9, 0xeeeeee, 3.2, 1.2, 0.5); }
+}
+
+// ---------------------------------------------------------------- landmarks: windmills, silo, farmhouse, wheat, hills
+const windmills = [], smokeSpots = [];
+let rubberDuck = null, balloon = null;
+const pondUniforms = { uTime: windUniform };
+{
+  const white = toon({ color: 0xf4efe6 }), red = toon({ color: 0xc8402c }), wood = toon({ map: plankTex }), dark = toon({ color: 0x5a3326, flatShading: true });
+  const later = []; // outlines copy the transform, so they are added once everything is placed
+  const add = (m, ol = 0.03) => { noRay(m); m.castShadow = true; scene.add(m); if (ol) later.push([m, ol]); return m; };
+  // windmills with spinning sails
+  for (const [x, z, s] of [[-46, -42, 1.25], [-50, 44, 1]]) {
+    const tower = add(new THREE.Mesh(new THREE.CylinderGeometry(1.3 * s, 2.3 * s, 9 * s, 8), white)); tower.position.set(x, 4.5 * s, z);
+    for (const y of [2.5, 6]) { const band = add(new THREE.Mesh(new THREE.CylinderGeometry(2.25 * s - y * 0.11 * s, 2.3 * s - y * 0.11 * s, 0.35 * s, 8), red), 0); band.position.set(x, y * s, z); }
+    const cap = add(new THREE.Mesh(new THREE.ConeGeometry(1.8 * s, 2.4 * s, 8), red)); cap.position.set(x, 10.2 * s, z);
+    const door = add(new THREE.Mesh(new THREE.BoxGeometry(1 * s, 1.8 * s, 0.2), wood), 0);
+    const face = Math.atan2(-x, -z); // look at the farm
+    door.position.set(x + Math.sin(face) * 2.15 * s, 0.9 * s, z + Math.cos(face) * 2.15 * s); door.rotation.y = face;
+    const hub = new THREE.Group(); hub.position.set(x + Math.sin(face) * 1.7 * s, 8.4 * s, z + Math.cos(face) * 1.7 * s); hub.rotation.y = face; scene.add(hub);
+    const sails = new THREE.Group(); hub.add(sails);
+    const knob = noRay(new THREE.Mesh(sphere14(), red)); knob.scale.setScalar(0.45 * s); sails.add(knob);
+    for (let k = 0; k < 4; k++) {
+      const arm = new THREE.Group(); arm.rotation.z = k * Math.PI / 2; sails.add(arm);
+      const spar = noRay(new THREE.Mesh(new THREE.BoxGeometry(0.18 * s, 6 * s, 0.12 * s), wood)); spar.position.y = 3 * s; arm.add(spar);
+      const cloth = noRay(new THREE.Mesh(new THREE.BoxGeometry(1.3 * s, 4.6 * s, 0.05 * s), k % 2 ? white : toon({ color: 0xffe6b0 }))); cloth.position.set(0.7 * s, 3.5 * s, 0.05); arm.add(cloth);
+      cloth.castShadow = true; outline(cloth, 0.04);
+    }
+    windmills.push(sails);
   }
+  // grain silo with a dome, and a little feed shed
+  {
+    const [x, z] = [44, -46];
+    const siloTex = canvasTex(64, 64, (g, w, h) => { g.fillStyle = '#d6dde3'; g.fillRect(0, 0, w, h); for (let y = 0; y < h; y += 8) { g.fillStyle = '#aeb8c2'; g.fillRect(0, y, w, 2); } }, 6, 2);
+    const body = add(new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 12, 16), toon({ map: siloTex }))); body.position.set(x, 6, z);
+    const dome = add(new THREE.Mesh(new THREE.SphereGeometry(2.65, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), toon({ color: 0xc8402c }))); dome.position.set(x, 12, z);
+    const shed = add(new THREE.Mesh(new THREE.BoxGeometry(4, 3, 4), red)); shed.position.set(x - 4.5, 1.5, z + 1);
+    const sr = add(new THREE.Mesh(new THREE.ConeGeometry(3.3, 1.6, 4), dark)); sr.position.set(x - 4.5, 3.8, z + 1); sr.rotation.y = Math.PI / 4;
+  }
+  // farmhouse with a smoking chimney and lit windows
+  {
+    const [x, z] = [48, 38];
+    const house = add(new THREE.Mesh(new THREE.BoxGeometry(8, 4.5, 6), toon({ color: 0xf2e2b8 }))); house.position.set(x, 2.25, z);
+    const roof = add(new THREE.Mesh(new THREE.CylinderGeometry(3.6, 3.6, 8.6, 3, 1, false, Math.PI / 2), toon({ color: 0x3f6fb0, flatShading: true })));
+    roof.rotation.z = Math.PI / 2; roof.position.set(x, 5.6, z); roof.scale.set(1, 1, 1.15);
+    const chim = add(new THREE.Mesh(new THREE.BoxGeometry(0.9, 2.4, 0.9), toon({ color: 0x9a4a32 }))); chim.position.set(x + 2.2, 7.2, z + 1);
+    smokeSpots.push(new THREE.Vector3(x + 2.2, 8.6, z + 1));
+    const glow = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.25, 0.55) });
+    for (const dx of [-2.4, 2.4]) { const w = noRay(new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.1), glow)); w.position.set(x + dx, 2.6, z - 3.01); w.rotation.y = Math.PI; scene.add(w); }
+    const door = noRay(new THREE.Mesh(new THREE.PlaneGeometry(1.2, 2.2), toon({ color: 0x8a4a2a }))); door.position.set(x, 1.1, z - 3.01); door.rotation.y = Math.PI; scene.add(door);
+    const porch = add(new THREE.Mesh(new THREE.BoxGeometry(9, 0.3, 2), wood), 0); porch.position.set(x, 0.15, z - 4);
+  }
+  // golden wheat fields that ripple in the wind
+  {
+    const stalk = new THREE.CylinderGeometry(0.03, 0.04, 1.3, 3); stalk.translate(0, 0.65, 0);
+    const head = new THREE.CylinderGeometry(0.07, 0.04, 0.32, 4); head.translate(0, 1.4, 0);
+    const merge = (a, b) => {
+      const g = new THREE.BufferGeometry(), pa = a.attributes.position.array, pb = b.attributes.position.array;
+      g.setAttribute('position', new THREE.Float32BufferAttribute([...pa, ...pb], 3));
+      const ia = [...a.index.array], off = a.attributes.position.count; g.setIndex([...ia, ...[...b.index.array].map(i => i + off)]);
+      g.computeVertexNormals(); return g;
+    };
+    const fields = [[0, -52, 22, 9], [0, 54, 22, 9], [-56, 0, 8, 18], [57, 4, 8, 18]];
+    const per = 520, wheat = new THREE.InstancedMesh(merge(stalk, head), swaying(toon({ color: 0xffffff }), 0.35), per * fields.length);
+    const d = new THREE.Object3D(), c = new THREE.Color(); let n = 0;
+    for (const [fx, fz, hw, hd] of fields) for (let i = 0; i < per; i++) {
+      d.position.set(fx + (Math.random() - 0.5) * 2 * hw, 0, fz + (Math.random() - 0.5) * 2 * hd);
+      d.rotation.set((Math.random() - 0.5) * 0.2, Math.random() * 6, (Math.random() - 0.5) * 0.2);
+      d.scale.setScalar(0.8 + Math.random() * 0.5); d.updateMatrix(); wheat.setMatrixAt(n, d.matrix);
+      wheat.setColorAt(n++, c.setHSL(0.11 + Math.random() * 0.03, 0.75, 0.5 + Math.random() * 0.12));
+    }
+    noRay(wheat); scene.add(wheat);
+    for (const [fx, fz, hw, hd] of fields) { // soil under the wheat
+      const soil = noRay(new THREE.Mesh(new THREE.PlaneGeometry(hw * 2 + 1, hd * 2 + 1), toon({ color: 0xb08a4a }))); soil.rotation.x = -Math.PI / 2; soil.position.set(fx, 0.01, fz); scene.add(soil);
+    }
+  }
+  // rolling hills on the horizon
+  const hillMats = [0x6db04a, 0x5ea53f, 0x7fbd52, 0x8cc45a].map(c => toon({ color: c }));
+  for (let i = 0; i < 26; i++) {
+    const a = (i / 26) * Math.PI * 2 + Math.random() * 0.15, r = 95 + Math.random() * 45;
+    const h = noRay(new THREE.Mesh(sphere14(), hillMats[i % 4]));
+    const w = 22 + Math.random() * 26; h.scale.set(w, 6 + Math.random() * 10, w * 0.7);
+    h.position.set(Math.cos(a) * r, -2, Math.sin(a) * r); h.rotation.y = -a; scene.add(h);
+  }
+  // a rubber duck in the pond, and an egg-shaped hot air balloon drifting by
+  {
+    rubberDuck = new THREE.Group();
+    const yel = toon({ color: 0xffd400 }), ora = toon({ color: 0xff7a00 });
+    const b = noRay(new THREE.Mesh(sphere14(), yel)); b.scale.set(0.7, 0.5, 0.9); b.position.y = 0.25;
+    const hd = noRay(new THREE.Mesh(sphere14(), yel)); hd.scale.setScalar(0.42); hd.position.set(0, 0.85, -0.45);
+    const bk = noRay(new THREE.Mesh(sphere14(), ora)); bk.scale.set(0.2, 0.08, 0.22); bk.position.set(0, 0.8, -0.85);
+    rubberDuck.add(b, hd, bk); scene.add(rubberDuck); outline(b, 0.06); outline(hd, 0.08);
+    rubberDuck.position.set(-21, 0, 26);
+    balloon = new THREE.Group();
+    const env = noRay(new THREE.Mesh(new THREE.SphereGeometry(4, 18, 14), toon({ map: canvasTex(64, 64, (g, w, h) => { for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#ffd84a' : '#ff6a4a'; g.fillRect(i * 8, 0, 8, h); } }) })));
+    env.scale.set(1, 1.3, 1);
+    const basket = noRay(new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.1, 1.4), wood)); basket.position.y = -6.6;
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { const rope = noRay(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 2.6), toon({ color: 0x5a3a1e }))); rope.position.set(sx * 0.65, -5, sz * 0.65); balloon.add(rope); }
+    const pilot = noRay(new THREE.Mesh(sphere14(), toon({ color: 0xf6f2ea }))); pilot.scale.setScalar(0.45); pilot.position.y = -5.7; // a hen, sightseeing
+    balloon.add(env, basket, pilot); outline(env, 0.03);
+    balloon.position.set(-80, 30, -60); scene.add(balloon);
+  }
+  // the pond gets a cartoon water shader: drifting bands of light and a foam rim
+  pondMaterial = new THREE.ShaderMaterial({
+    uniforms: pondUniforms, fog: false,
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: `uniform float uTime; varying vec2 vUv;
+      void main(){
+        vec2 p = (vUv - 0.5) * 2.0; float r = length(p);
+        float w = sin(p.x * 9.0 + uTime * 1.3 + sin(p.y * 7.0 + uTime) * 1.5) * sin(p.y * 8.0 - uTime * 1.1);
+        vec3 deep = vec3(0.10, 0.42, 0.78), shallow = vec3(0.30, 0.70, 0.95);
+        vec3 c = mix(deep, shallow, smoothstep(0.1, 1.0, r));
+        c += vec3(0.55, 0.8, 1.0) * step(0.72, w) * 0.35;
+        float foam = smoothstep(0.86, 0.93, r + sin(atan(p.y, p.x) * 10.0 + uTime * 2.0) * 0.02);
+        c = mix(c, vec3(1.0), foam);
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+  pondMesh.material = pondMaterial;
+  for (const [m, k] of later) outline(m, k);
 }
 
 // ---------------------------------------------------------------- obstacles: hay bales and fences
@@ -362,11 +543,19 @@ const points = POINT_DEFS.map(([name, x, z]) => {
   const eggMat = toon({ color: NEUTRAL_COLOR, emissive: 0x111111, map: speckleTex });
   const flag = noRay(new THREE.Mesh(new THREE.SphereGeometry(0.75, 20, 14), eggMat)); // the egg
   flag.scale.set(1, 1.35, 1); flag.position.y = 1.0; flag.castShadow = true;
-  g.add(disc, rim, arc, nest, flag);
+  const beamGeo = new THREE.CylinderGeometry(0.9, 1.3, 14, 20, 1, true); beamGeo.translate(0, 7, 0);
+  const beam = noRay(new THREE.Mesh(beamGeo, new THREE.ShaderMaterial({ // a soft light column over a held nest
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+    uniforms: { uColor: { value: new THREE.Color(1, 1, 1) }, uTime: windUniform },
+    vertexShader: 'varying float vY; void main(){ vY = position.y / 14.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: 'uniform vec3 uColor; uniform float uTime; varying float vY; void main(){ float a = (1.0 - vY) * (0.35 + 0.15 * sin(vY * 20.0 - uTime * 4.0)); gl_FragColor = vec4(uColor * a, a); }',
+  })));
+  beam.visible = false;
+  g.add(disc, rim, arc, nest, flag, beam);
   outline(flag, 0.05); outline(nest, 0.06);
   g.position.set(x, 0, z);
   scene.add(g);
-  return { name, x, z, owner: null, prog: 0, disc, rim, arc, flag, lastArc: -2 };
+  return { name, x, z, owner: null, prog: 0, disc, rim, arc, flag, beam, lastArc: -2 };
 });
 const pointColor = p => (p.owner === PLAYER ? TEAM_COLORS[PLAYER] : p.owner === ENEMY ? TEAM_COLORS[ENEMY] : NEUTRAL_COLOR);
 const playerPointCount = () => points.filter(p => p.owner === PLAYER).length;
@@ -381,6 +570,9 @@ const orangeMat = toon({ color: 0xff8a1f, roughness: 0.5 });
 const beakMat = toon({ color: 0xffb21f, roughness: 0.5 });
 const combMat = toon({ color: 0xe0242a, roughness: 0.6 });
 const eyeMat = toon({ color: 0x111111, roughness: 0.2 });
+const eyeWhiteMat = toon({ color: 0xffffff });
+const shineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const blushMat = new THREE.MeshBasicMaterial({ color: 0xff9aa8 });
 const bucketMat = toon({ color: 0x9aa4ae, roughness: 0.35, metalness: 0.7 });
 const strawMat = toon({ color: 0xe6c66a, roughness: 1 });
 const BODY_COLORS = [0xffd84a, 0xf6f2ea];      // ducks are yellow, hens are white
@@ -427,7 +619,22 @@ function makeUnit(team, type, x, z) {
   const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.18, headY - 0.75, 8), bodyMat);
   neck.position.set(0, (headY + 0.75) / 2, headZ * 0.85); g.add(neck);
   const headMesh = blob(bodyMat, 0.27, 0.26, 0.28, 0, headY, headZ); g.add(headMesh);
-  for (const s of [-1, 1]) g.add(blob(eyeMat, 0.05, 0.06, 0.05, s * 0.17, headY + 0.07, headZ - 0.18));
+  // big cartoon eyes: white, pupil, a shine dot; they blink now and then
+  u.eyes = [];
+  for (const s of [-1, 1]) {
+    const eye = new THREE.Group(); eye.position.set(s * 0.15, headY + 0.07, headZ - 0.17);
+    eye.add(blob(eyeWhiteMat, 0.085, 0.1, 0.07, 0, 0, 0));
+    eye.add(blob(eyeMat, 0.045, 0.058, 0.04, s * 0.02, 0, -0.055));
+    eye.add(blob(shineMat, 0.016, 0.018, 0.012, s * 0.03, 0.025, -0.09));
+    if (team === ENEMY) { // angry hen eyebrows
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.035, 0.04), eyeMat); brow.position.set(s * 0.01, 0.1, -0.05); brow.rotation.z = -s * 0.45; eye.add(brow);
+    }
+    g.add(eye); u.eyes.push(eye);
+  }
+  if (team === ENEMY) for (const s of [-1, 1]) g.add(blob(blushMat, 0.06, 0.035, 0.04, s * 0.2, headY - 0.06, headZ - 0.13));
+  else if (type === 'trooper') { // a curl of feathers on top
+    const tuft = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.025, 5, 10, Math.PI * 1.4), bodyMat); tuft.position.set(0, headY + 0.3, headZ + 0.02); tuft.rotation.y = Math.PI / 2; g.add(tuft);
+  }
   if (team === PLAYER) { // flat duck bill
     const bill = blob(type === 'sniper' ? beakMat : orangeMat, 0.15, 0.06, type === 'sniper' ? 0.42 : 0.24, 0, headY - 0.04, headZ - 0.32); g.add(bill);
   } else { // pointy beak, comb and wattle
@@ -462,6 +669,7 @@ function makeUnit(team, type, x, z) {
   outline(bodyMesh, 0.07); outline(headMesh, 0.09);
   u.animT = Math.random() * 10;
   if (type === 'elite') g.scale.setScalar(1.3);
+  u.baseScale = type === 'elite' ? 1.3 : 1;
   tagMeshes(g, u);
   const ring = noRay(new THREE.Mesh(
     new THREE.RingGeometry(r + 0.12, r + 0.28, 28),
@@ -496,7 +704,7 @@ function makeBase(team, x, z) {
   const cross = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.18, 0.12), bodyMat);
   cross.position.copy(door.position); cross.rotation.z = 0.7;
   const cross2 = cross.clone(); cross2.rotation.z = -0.7;
-  const beacon = new THREE.Mesh(sphere, toon({ color: 0xffd34a, emissive: 0xffa000, emissiveIntensity: 0.7, metalness: 0.4, roughness: 0.3 }));
+  const beacon = new THREE.Mesh(sphere, toon({ color: 0xffd34a, emissive: 0xffa000, emissiveIntensity: 1.6, metalness: 0.4, roughness: 0.3 }));
   beacon.scale.set(0.5, 0.65, 0.5);
   beacon.position.y = 4.9;
   g.add(core, roof, door, cross, cross2, beacon);
@@ -755,7 +963,7 @@ function burst(x, y, z, size, color) {
   const m = noRay(new THREE.Mesh(sparkGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false })));
   m.position.set(x, y, z); m.scale.setScalar(size * 0.3);
   scene.add(m);
-  effects.push({ m, life: 0.45, max: 0.45, size });
+  effects.push({ m, life: 0.45, max: 0.45, size });  if (size >= 2) smoke(x, Math.max(0.3, y - 0.5), z, Math.min(3, size * 0.45), Math.min(14, 4 + Math.round(size * 1.5)));
 }
 function ping(x, z, color, size = 1, life = 0.5) {
   const m = noRay(new THREE.Mesh(new THREE.RingGeometry(0.5, 0.75, 32), new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false })));
@@ -770,6 +978,8 @@ const bulletMats = {
   seed: new THREE.MeshBasicMaterial({ color: 0xfff4ea, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
   gold: new THREE.MeshBasicMaterial({ color: 0xffc340, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
 };
+// overbright so they glow under bloom
+bulletMats.corn.color.setRGB(2.4, 2.0, 0.7); bulletMats.seed.color.setRGB(2.0, 1.9, 1.7); bulletMats.gold.color.setRGB(2.6, 1.7, 0.4);
 const bullets = [];
 for (let i = 0; i < 220; i++) {
   const m = noRay(new THREE.Mesh(bulletGeo, bulletMats.corn));
@@ -821,6 +1031,78 @@ function updateDebris(dt) {
     if (d.m.position.y < 0.03) { d.m.position.y = 0.03; d.v.y *= -0.35; d.v.x *= 0.6; d.v.z *= 0.6; }
     d.m.rotation.x += d.spin * dt; d.m.rotation.y += d.spin * 0.7 * dt;
     if (d.life <= 0) { scene.remove(d.m); debris.splice(i, 1); }
+  }
+}
+
+// soft sprite puffs: dust when birds walk, smoke from blasts and the chimney
+const puffTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 2, 32, 32, 31);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.55, 'rgba(255,255,255,0.65)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.beginPath(); g.arc(32, 32, 31, 0, 7); g.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const puffs = [];
+for (let i = 0; i < 110; i++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: puffTex, transparent: true, depthWrite: false, opacity: 0 }));
+  sp.visible = false; sp.raycast = () => {}; scene.add(sp);
+  puffs.push({ sp, life: 0, max: 1, vy: 0, vx: 0, vz: 0, size: 1, grow: 1, alpha: 1 });
+}
+let puffIdx = 0;
+function puff(x, y, z, size, color, life = 0.8, vy = 0.6, alpha = 0.7, spread = 0.4) {
+  const p = puffs[puffIdx++ % puffs.length];
+  p.sp.position.set(x, y, z); p.sp.material.color.setHex(color); p.sp.visible = true;
+  p.life = p.max = life; p.vy = vy; p.vx = (Math.random() - 0.5) * spread; p.vz = (Math.random() - 0.5) * spread;
+  p.size = size; p.alpha = alpha; p.sp.material.rotation = Math.random() * 6;
+}
+function smoke(x, y, z, r, n = 8) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * 6.28, d = Math.random() * r * 0.6;
+    puff(x + Math.cos(a) * d, y + Math.random() * r * 0.5, z + Math.sin(a) * d, r * (0.6 + Math.random() * 0.5), i % 3 ? 0xdddddd : 0xfff0c0, 0.9 + Math.random() * 0.7, 1 + Math.random() * 1.5, 0.75, r * 1.2);
+  }
+}
+function updatePuffs(dt) {
+  for (const p of puffs) {
+    if (p.life <= 0) continue;
+    p.life -= dt;
+    if (p.life <= 0) { p.sp.visible = false; continue; }
+    const k = 1 - p.life / p.max;
+    p.sp.position.x += p.vx * dt; p.sp.position.y += p.vy * dt; p.sp.position.z += p.vz * dt;
+    p.sp.scale.setScalar(p.size * (0.4 + k * 1.1));
+    p.sp.material.opacity = p.alpha * (k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85);
+  }
+}
+// confetti when a nest flips
+const confettiGeo = new THREE.PlaneGeometry(0.14, 0.09);
+const confettiMats = [0xff5a5a, 0xffd84a, 0x4fd16a, 0x4f9aff, 0xff8fe0, 0xffffff].map(c => new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide }));
+const confettiList = [];
+function confetti(x, z, n = 60) {
+  for (let i = 0; i < n; i++) {
+    const m = noRay(new THREE.Mesh(confettiGeo, confettiMats[i % confettiMats.length]));
+    m.position.set(x, 1.6, z); m.rotation.set(Math.random() * 6, Math.random() * 6, 0); scene.add(m);
+    const a = Math.random() * 6.28, sp = 2 + Math.random() * 5;
+    confettiList.push({ m, vx: Math.cos(a) * sp, vy: 6 + Math.random() * 6, vz: Math.sin(a) * sp, spin: 6 + Math.random() * 10, life: 2.2 + Math.random() });
+  }
+  if (confettiList.length > 300) for (const c of confettiList.splice(0, confettiList.length - 300)) scene.remove(c.m);
+}
+// knocked-out birds pop up, spin and vanish instead of disappearing on the spot
+const corpses = [];
+function tumble(mesh) { corpses.push({ m: mesh, t: 0, vy: 5, spin: (Math.random() < 0.5 ? -1 : 1) * (8 + Math.random() * 6), s0: mesh.scale.x }); }
+function updateKO(dt) {
+  for (let i = confettiList.length - 1; i >= 0; i--) {
+    const c = confettiList[i]; c.life -= dt;
+    c.vy = Math.max(-1.6, c.vy - 14 * dt); c.vx *= 1 - dt * 1.5; c.vz *= 1 - dt * 1.5;
+    c.m.position.x += c.vx * dt; c.m.position.y = Math.max(0.03, c.m.position.y + c.vy * dt); c.m.position.z += c.vz * dt;
+    c.m.rotation.x += c.spin * dt; c.m.rotation.y += c.spin * 0.7 * dt;
+    if (c.life <= 0) { scene.remove(c.m); confettiList.splice(i, 1); }
+  }
+  for (let i = corpses.length - 1; i >= 0; i--) {
+    const c = corpses[i]; c.t += dt; c.vy -= 22 * dt;
+    c.m.position.y = Math.max(0, c.m.position.y + c.vy * dt);
+    c.m.rotation.z += c.spin * dt * 0.5; c.m.rotation.x += c.spin * dt * 0.25;
+    const s = c.s0 * Math.max(0.01, 1 - Math.max(0, c.t - 0.35) / 0.3);
+    c.m.scale.set(s, s, s);
+    if (c.t > 0.65) { scene.remove(c.m); corpses.splice(i, 1); if (c.t > 0) puff(c.m.position.x, 0.4, c.m.position.z, 1.2, 0xffffff, 0.6, 0.8, 0.8); }
   }
 }
 
@@ -1117,7 +1399,8 @@ function kill(e, src) {
   burst(e.x, e.isBase ? 2 : 1, e.z, e.isBase ? 6 : 1.2, e.isBase ? 0xffaa44 : 0xffffff);
   feathers(e.x, e.z, e.isBase ? 0xffe6a0 : e.elite ? 0xffc340 : e.team === PLAYER ? 0xffd84a : 0xffffff, e.isBase ? 40 : 14);
   sfx(e.isBase ? 'boom' : e.team === PLAYER ? 'quack' : 'bawk', e.x, e.z);
-  scene.remove(e.mesh);
+  if (e.isBase || e.possessed) scene.remove(e.mesh);
+  else { if (e.ring) e.ring.visible = false; tumble(e.mesh); }
   if (e.isBase) {
     const i = boxes.indexOf(e.box); if (i >= 0) boxes.splice(i, 1);
     rebuildGrid();
@@ -1223,7 +1506,7 @@ function updatePoints(dt) {
     p.capturing = you && !p.contested && p.prog < 1;
     // ownership flips at the ends, and is lost when the bar crosses the middle
     if (p.prog >= 1 && p.owner !== PLAYER) {
-      p.owner = PLAYER; sfx('chime'); burst(p.x, 1, p.z, 3, TEAM_COLORS[PLAYER]);
+      p.owner = PLAYER; sfx('chime'); burst(p.x, 1, p.z, 3, TEAM_COLORS[PLAYER]); confetti(p.x, p.z);
       radio(`Nest ${p.name} is ours! +${CP_PER_POINT} corn/s`, 'good');
       onPointsChanged();
     } else if (p.prog <= -1 && p.owner !== ENEMY) {
@@ -1238,7 +1521,7 @@ function updatePoints(dt) {
     }
     // visuals
     const col = pointColor(p);
-    p.rim.material.color.setHex(col); p.flag.material.color.setHex(col); p.disc.material.color.setHex(col);
+    p.rim.material.color.setHex(col); p.flag.material.color.setHex(col); p.disc.material.color.setHex(col); p.beam.visible = p.owner !== null; p.beam.material.uniforms.uColor.value.setHex(col).multiplyScalar(1.6);
     p.disc.material.opacity = p.capturing ? 0.22 + Math.sin(game.time * 8) * 0.06 : 0.12;
     p.flag.position.y = 1.0 + (p.capturing ? Math.abs(Math.sin(game.time * 10)) * 0.25 : 0);
     p.flag.scale.set(1 + Math.abs(p.prog) * 0.25, 1.35 + Math.abs(p.prog) * 0.35, 1 + Math.abs(p.prog) * 0.25);
@@ -1397,7 +1680,7 @@ const viewmodel = new THREE.Group();
   const muzzle = new THREE.Object3D(); muzzle.position.z = -0.58; viewmodel.add(muzzle);
   viewmodel.userData.muzzle = muzzle;
   const flash = new THREE.Group();
-  const flashMat = new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const flashMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 2.4, 1.1), transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
   for (let k = 0; k < 3; k++) { // a star of crossed quads
     const q = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.07), flashMat); q.rotation.z = k * Math.PI / 3; flash.add(q);
   }
@@ -2146,6 +2429,8 @@ tapButton($('btnBuyHeavy'), () => buy('heavy'));
 tapButton($('btnBuySniper'), () => buy('sniper'));
 tapButton($('btnStart'), startGame);
 tapButton($('btnStartTac'), startTactics);
+tapButton($('btnGfx'), () => { gfx.auto = false; setFancy(!gfx.fancy); });
+setFancy(gfx.fancy, null, false);
 tapButton($('btnHold'), holdSelected);
 tapButton($('btnBomb'), () => setTool(tac.tool === 'bomb' ? 'move' : 'bomb'));
 tapButton($('btnHero'), heroFromSelection);
@@ -2461,6 +2746,9 @@ function drawPlans() {
 function resize() {
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h, false);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(w, h);
+  gradePass.uniforms.uAspect.value = w / h;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   const dpr = Math.min(window.devicePixelRatio, 2);
@@ -2631,6 +2919,8 @@ function animateBird(e, dt, now) {
     fl.position.z = -0.08 + s * 0.14; fr.position.z = -0.08 - s * 0.14;
     fl.position.y = 0.03 + Math.max(0, s) * 0.09; fr.position.y = 0.03 + Math.max(0, -s) * 0.09;
     up.scale.y = 1;
+    const step = Math.sign(s);
+    if (step !== e.lastStep) { e.lastStep = step; if (Math.random() < 0.45) puff(e.x + (Math.random() - 0.5) * 0.4, 0.15, e.z + (Math.random() - 0.5) * 0.4, 0.45, 0xd8c39a, 0.55, 0.5, 0.55); }
   } else {
     const k = Math.min(1, dt * 10);
     up.rotation.z -= up.rotation.z * k; up.position.y -= up.position.y * k;
@@ -2645,6 +2935,7 @@ function animateBird(e, dt, now) {
     wl.rotation.z = 0.35 + f; wr.rotation.z = -0.35 - f;
     up.rotation.x = -0.1;
   } else { wl.rotation.z *= 0.85; wr.rotation.z *= 0.85; }
+  if (e.eyes) { const b = (now / 1000 + e.animT * 1.7) % 3.6 < 0.12 ? 0.1 : 1; for (const ey of e.eyes) ey.scale.y = b; }
 }
 
 // ---------------------------------------------------------------- main loop
@@ -2676,8 +2967,10 @@ function frame(now) {
     selection = selection.filter(e => !e.dead);
   }
   for (const e of entities) {
+    if (e.dead) continue;
     if (e.isBase) { e.bodyMat.emissive.setHex(e.flash > 0 ? 0x552211 : 0); e.flash -= dt; continue; }
     e.mesh.position.set(e.x, 0, e.z);
+    { const q = Math.max(0, e.flash) * 1.4, b = e.baseScale || 1; e.mesh.scale.set(b * (1 + q), b * (1 - q), b * (1 + q)); } // squash when hit
     if (e.upper && !(tac.on && tac.phase === 'plan')) animateBird(e, dt, now);
     e.mesh.rotation.y = e.facing;
     e.mesh.visible = !e.possessed;
@@ -2695,10 +2988,13 @@ function frame(now) {
   for (let i = dmgNums.length - 1; i >= 0; i--) { dmgNums[i].life -= dt; if (dmgNums[i].life <= 0) dmgNums.splice(i, 1); }
   fps.hurt = Math.max(0, fps.hurt - dt);
   updateEffects(dt);
+  updatePuffs(dt);
+  updateKO(dt);
   updateAmbient(dt, now);
   updateCamera(dt);
+  if (window.__camOverride) window.__camOverride(camera);
   if (mode !== 'menu') updateHud(dt); else if (toastTimer > 0) toastTimer -= dt;
-  renderer.render(scene, camera);
+  renderFrame(dt);
   drawOverlay();
   drawMinimap();
   requestAnimationFrame(frame);
@@ -2711,5 +3007,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
-  tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
+  scene, camera, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
 };

@@ -62,9 +62,16 @@ Win: hold all 3 nests to crack the coop's eggshell, then destroy the coop. Lose:
 | First person | WASD, mouse (pointer lock), click or Space to fire | Left stick, drag anywhere on the right to aim, hold **FIRE** (also aims while held); all at once, multitouch |
 | Extras | **Q**/**E** abilities, **X** ultimate, **R** rally, **C** swap, **F**/**Tab** back | Ability buttons and **★** above FIRE, **Rally flock**, **Swap bird**, **◀ Command** |
 
+## Graphics
+
+Cartoon look: toon shading with ink outlines, a sky dome, swaying grass and wheat, a water shader on the pond, windmills, a silo, a farmhouse, hills and a drifting balloon. Birds blink, waddle, kick up dust, squash when hit and tumble when knocked out; held nests get a light column and confetti.
+
+**Fancy** graphics add bloom, colour grading and a vignette through a post-processing pass (`vendor/jsm`, three.js r170 addons). The menu toggle switches between fancy and fast, and the game drops to fast by itself if the frame rate stays low. Add `?fancy=1` or `?fancy=0` to the URL to force a mode.
+
 ## Code map
 
 - `index.html`, `style.css`: page, HUD and touch controls.
+- `vendor/`: three.js and the post-processing addons (imports rewritten to relative paths, no build step).
 - `src/main.js`: everything else: world, procedural farm art, birds and roles, nests and capture, A* pathfinding on a 1×1 grid, unit AI and hen waves, RTS input and shop, FPS possession and abilities, camera transitions, alerts, HUD and minimap.
 
 `window.__game` exposes a few hooks for automated smoke tests.
