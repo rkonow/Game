@@ -25,6 +25,16 @@ One loop: **sit on the nests, crack the shell, raid the coop.**
 - **Switching** is free any time, with a slow-motion swoop. If your bird gets cooked you wait 5s. Alerts ("Hens are pecking at nest B!") have a **Drop in** button that puts you in the nearest bird.
 - Hens attack in growing waves, each heading for a nest, and every ~90s the **Big Rooster** comes out to hunt the bird you're controlling.
 
+## Tactics mode
+
+Pick **Tactics** on the menu for a turn-based take on the same battle (6 birds vs 8 hens, no waves, no corn):
+
+1. **Plan** with the game paused: select birds and tap/right-click to send them somewhere (they fight on the way), **Hold** to stay put, or **🥚 Egg bomb** (ducks only) to lob an egg at a spot. Planned paths are drawn on the map. Pick one **★ Hero**.
+2. **Go**: 20 seconds of live combat. Everyone acts on their orders at once, the hens on theirs (they plan at the same time: grab nests, hunt ducks, fall back when hurt). You play the hero in first person and get one radio call (**Rally**) per round.
+3. Repeat. Orders not finished carry over to the next round.
+
+Win by holding all 3 nests at the end of a round, or by plucking every hen. Lose if the hens hold all 3 nests at the end of a round, or your flock is wiped out. Desktop keys in the plan phase: **H** hold, **B** egg bomb, **F** hero, **Space**/**Enter** go.
+
 ## Controls
 
 | | Desktop | Touch |

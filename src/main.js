@@ -621,6 +621,9 @@ const game = { cp: CP_START, relink: 0, slowmo: 0, time: 0 };
 const rts = { focus: new THREE.Vector3(0, 0, 14), zoom: 26 };
 const fps = { yaw: 0, pitch: 0, firing: false, bob: 0, hitMarker: 0, hurt: 0, flash: 0, stickX: 0, stickY: 0, scoped: false };
 let trans = null;            // camera transition
+// Tactics mode: plan with the game paused, then ROUND_TIME seconds of live combat.
+const ROUND_TIME = 20;
+const tac = { on: false, phase: 'plan', round: 0, t: 0, hero: null, tool: 'move', rallyUsed: false };
 const keys = new Set();
 let isTouch = false;
 
@@ -644,7 +647,7 @@ function radio(msg, kind = '', opts = {}) {
   const d = document.createElement('div');
   if (kind) d.className = kind;
   const span = document.createElement('span'); span.textContent = msg; d.appendChild(span);
-  if (opts.dropAt) {
+  if (opts.dropAt && !tac.on) {
     const b = document.createElement('button');
     b.textContent = 'Drop in ▶';
     tapButton(b, () => { dropInNear(opts.dropAt.x, opts.dropAt.z); d.remove(); });
@@ -652,7 +655,7 @@ function radio(msg, kind = '', opts = {}) {
   }
   radioEl.appendChild(d);
   while (radioEl.children.length > 4) radioEl.removeChild(radioEl.firstChild);
-  const life = opts.dropAt ? 7000 : 4500;
+  const life = opts.dropAt && !tac.on ? 7000 : 4500;
   setTimeout(() => d.classList.add('fade'), life);
   setTimeout(() => d.remove(), life + 700);
   if (kind === 'warn') sfx('beep');
@@ -761,7 +764,7 @@ function damage(t, amount, src) {
   t.flash = 0.12;
   if (t.possessed) fps.hurt = 0.5;
   if (t === playerBase) radio('Our barn is under attack!', 'warn', { key: 'base', gap: 10, dropAt: playerBase });
-  if (!t.isBase && !t.possessed && t.order.type === 'idle' && src && src.kind === 'unit' && !src.dead) t.order = { type: 'attack', target: src, auto: true };
+  if (!tac.on && !t.isBase && !t.possessed && t.order.type === 'idle' && src && src.kind === 'unit' && !src.dead) t.order = { type: 'attack', target: src, auto: true };
   if (t.hp <= 0) kill(t, src);
 }
 
@@ -778,10 +781,17 @@ function kill(e, src) {
     endGame(e.team === ENEMY);
     return;
   }
-  if (e.team === ENEMY) {
+  if (e.team === ENEMY && !tac.on) {
     game.cp = Math.min(CP_MAX, game.cp + 3);
     if (e.elite) { game.cp = Math.min(CP_MAX, game.cp + 40); radio('The Big Rooster is plucked! +40 corn', 'good'); }
-  } else if (e === possessed) {
+  }
+  if (tac.on) {
+    if (e === possessed) { radio(`Your hero ${nameOf(e).toLowerCase()} got cooked. Watch the rest of the round.`, 'warn'); rts.focus.set(e.x, 0, e.z); possessed = null; exitFPS(); }
+    if (!countUnits(ENEMY)) endGame(true, `Every hen plucked in ${tac.round} round${tac.round === 1 ? '' : 's'}.`);
+    else if (!countUnits(PLAYER)) endGame(false, `Your flock was wiped out in round ${tac.round}.`);
+    return;
+  }
+  if (e.team === PLAYER && e === possessed) {
     game.relink = RELINK_CD;
     radio(`Your ${nameOf(e).toLowerCase()} got cooked. Drop in again in ${RELINK_CD}s.`, 'warn');
     rts.focus.set(e.x, 0, e.z);
@@ -798,6 +808,11 @@ function updateUnit(u, dt) {
   u.moving = false;
   if (u.possessed) return;
   const o = u.order;
+  if (o.type === 'bomb') { // walk until in throwing range, then lob an egg bomb
+    if (Math.hypot(o.x - u.x, o.z - u.z) <= 10) { throwEgg(u, o.x, o.z); u.order = { type: 'idle' }; }
+    else { pathTo(u, o.x, o.z); moveAlong(u, dt); }
+    return;
+  }
   let target = null;
   if (o.type === 'attack') {
     if (o.target.dead) u.order = { type: 'idle' };
@@ -814,6 +829,7 @@ function updateUnit(u, dt) {
       return;
     }
     if (o.auto && d > u.range + 8) { u.order = { type: 'idle' }; return; }
+    if (tac.on && o.type === 'idle') return; // in tactics, idle means hold this spot
     pathTo(u, target.x, target.z);
     moveAlong(u, dt);
     return;
@@ -888,6 +904,7 @@ function updatePoints(dt) {
 }
 
 function onPointsChanged() {
+  if (tac.on) return; // tactics wins by holding nests at the end of a round
   const all = playerPointCount() === points.length;
   if (all && enemyBase.shield) {
     enemyBase.shield = false; enemyBase.shieldMesh.visible = false;
@@ -908,7 +925,7 @@ function spawnPlayer(type) {
 }
 
 function buy(type) {
-  if (mode !== 'rts') return;
+  if (mode !== 'rts' || tac.on) return;
   if (countUnits(PLAYER) >= PLAYER_CAP) { toast('The flock is full', 1); return; }
   if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} corn`, 1); return; }
   game.cp -= COSTS[type];
@@ -998,7 +1015,7 @@ function updateGrenades(dt) {
     g.vel.y -= 20 * dt;
     g.pos.addScaledVector(g.vel, dt);
     g.mesh.position.copy(g.pos);
-    const inBox = boxes.some(b => g.pos.y < 2 && g.pos.x > b.minX && g.pos.x < b.maxX && g.pos.z > b.minZ && g.pos.z < b.maxZ);
+    const inBox = (!g.noBox || g.vel.y < 0) && boxes.some(b => g.pos.y < 2 && g.pos.x > b.minX && g.pos.x < b.maxX && g.pos.z > b.minZ && g.pos.z < b.maxZ);
     if (g.pos.y <= 0.15 || inBox || g.t > 2) {
       scene.remove(g.mesh);
       explode(g.pos.x, g.pos.z, 3.4, 60, g.src);
@@ -1038,6 +1055,10 @@ const tmpV = new THREE.Vector3();
 
 function possess(u) {
   if (!u || u.dead || u.isBase || u.team !== PLAYER) return;
+  if (tac.on) {
+    if (tac.phase === 'plan') { tac.hero = u; selection = [u]; updateButtons(); toast(`★ ${nameOf(u)} is your hero this round`, 1.2); return; }
+    if (u !== tac.hero) { toast('Only your ★ hero can be played this round', 1.2); return; }
+  }
   if (game.relink > 0) { toast(`Drop in again in ${Math.ceil(game.relink)}s`, 1.2); return; }
   const swap = mode === 'fps';
   if (possessed && possessed !== u) { possessed.possessed = false; possessed.mesh.visible = true; possessed.order = { type: 'idle' }; }
@@ -1073,6 +1094,7 @@ function exitFPS() {
 }
 
 function swapUnit() {
+  if (tac.on) { toast('One hero per round', 1); return; }
   const mine = playerUnits();
   if (mine.length < 2) { toast('No other birds', 1); return; }
   const i = mine.indexOf(possessed);
@@ -1080,6 +1102,7 @@ function swapUnit() {
 }
 
 function rally() {
+  if (tac.on && tac.rallyUsed) { toast('Radio call already used this round', 1); return; }
   raycaster.setFromCamera({ x: 0, y: 0 }, camera);
   raycaster.far = 80;
   const hit = raycaster.intersectObjects(staticShootables, false)[0];
@@ -1088,6 +1111,7 @@ function rally() {
   if (!squad.length) squad = playerUnits().filter(e => !e.possessed && Math.hypot(e.x - possessed.x, e.z - possessed.z) < 14);
   if (!squad.length) { toast('No squad nearby', 1); return; }
   commandMove(squad, hit.point.x, hit.point.z, 'amove');
+  if (tac.on) tac.rallyUsed = true;
   radio(`${squad.length} birds waddling to where you aimed`, 'good');
 }
 
@@ -1268,7 +1292,9 @@ function markTouch(on) {
 }
 document.body.classList.add('desktop');
 if (window.matchMedia && matchMedia('(pointer: coarse)').matches) markTouch(true);
-window.addEventListener('pointerdown', e => markTouch(e.pointerType === 'touch'), true);
+let lastTouchAt = -1e9;
+window.addEventListener('pointerdown', e => { markTouch(e.pointerType === 'touch'); if (e.pointerType !== 'mouse') lastTouchAt = performance.now(); }, true);
+window.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') lastTouchAt = performance.now(); }, true);
 
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -1360,6 +1386,7 @@ function handleTap(sx, sy, { secondary, shift, ctrl, touch }) {
   const ent = pickEntity(sx, sy);
   const gp = groundPoint(sx, sy);
   const sel = liveSelection();
+  if (tac.on) { tacticsTap(ent, gp, sel, { secondary, shift, touch }); return; }
   if (amoveArmed && !secondary) {
     amoveArmed = false; updateButtons();
     if (ent && ent.team === ENEMY) commandAttack(sel, ent);
@@ -1392,7 +1419,16 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Tab') e.preventDefault();
   if (e.repeat) return;
   keys.add(e.code);
-  if (mode === 'rts') {
+  if (mode === 'rts' && tac.on) {
+    if (e.code === 'KeyQ') selectAll();
+    else if (e.code === 'Escape') { setTool('move'); selection = []; updateButtons(); }
+    else if (tac.phase === 'plan') {
+      if (e.code === 'KeyH') holdSelected();
+      else if (e.code === 'KeyB') setTool(tac.tool === 'bomb' ? 'move' : 'bomb');
+      else if (e.code === 'KeyF') heroFromSelection();
+      else if (e.code === 'Enter' || e.code === 'Space') goLive();
+    } else if (e.code === 'KeyF') possessFromSelection();
+  } else if (mode === 'rts') {
     if (e.code === 'KeyF') possessFromSelection();
     else if (e.code === 'KeyQ') selectAll();
     else if (e.code === 'KeyX') toggleAMove();
@@ -1483,8 +1519,9 @@ document.addEventListener('dblclick', e => e.preventDefault());
 
 function tapButton(el, fn) {
   // touch: act on pointerdown so it works while other fingers are busy; mouse/keyboard: click
-  el.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') { e.preventDefault(); e.stopPropagation(); el._touched = performance.now(); fn(); } });
-  el.addEventListener('click', e => { e.preventDefault(); if (performance.now() - (el._touched || 0) > 600) fn(); });
+  // (the ghost click that follows a touch can land on a different button once the UI changes, so ignore all clicks shortly after any touch)
+  el.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') { e.preventDefault(); e.stopPropagation(); fn(); } });
+  el.addEventListener('click', e => { e.preventDefault(); if (performance.now() - lastTouchAt > 800) fn(); });
 }
 tapButton($('btnAll'), selectAll);
 tapButton($('btnAMove'), toggleAMove);
@@ -1497,6 +1534,11 @@ tapButton($('btnBuyTrooper'), () => buy('trooper'));
 tapButton($('btnBuyHeavy'), () => buy('heavy'));
 tapButton($('btnBuySniper'), () => buy('sniper'));
 tapButton($('btnStart'), startGame);
+tapButton($('btnStartTac'), startTactics);
+tapButton($('btnHold'), holdSelected);
+tapButton($('btnBomb'), () => setTool(tac.tool === 'bomb' ? 'move' : 'bomb'));
+tapButton($('btnHero'), heroFromSelection);
+tapButton($('btnGo'), goLive);
 tapButton($('btnRestart'), () => location.reload());
 
 function selectAll() {
@@ -1510,6 +1552,7 @@ function toggleAMove() {
   if (amoveArmed) toast(isTouch ? 'Tap a destination' : 'Click a destination', 1);
 }
 function possessFromSelection() {
+  if (tac.on) { if (tac.phase === 'live' && tac.hero && !tac.hero.dead) possess(tac.hero); else heroFromSelection(); return; }
   const sel = liveSelection();
   if (sel.length) { possess(sel[0]); return; }
   dropInNear(rts.focus.x, rts.focus.z);
@@ -1528,7 +1571,8 @@ function toast(msg, secs = 2) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show'); toastTimer = secs;
 }
 
-function startGame() {
+function startGame(tactics = false) {
+  if (tactics !== true) tactics = false; // also called from a click handler
   initAudio();
   if (audio && audio.resume) audio.resume();
   $('menu').classList.add('hidden');
@@ -1537,19 +1581,197 @@ function startGame() {
   rts.zoom = camera.aspect < 1 ? 42 : 30; // portrait phones need a wider view
   selection = playerUnits();
   updateButtons();
+  if (tactics) { toast(isTouch ? 'Tap birds, tap the ground to plan, then Go' : 'Select birds, right-click to plan, then Go (Space)', 3.5); return; }
   toast(isTouch ? 'Double-tap a duck to become it' : 'Double-click a duck (or press F) to become it', 3);
   setTimeout(() => radio('Only YOU can claim a nest: drop into a duck and sit on nest B', 'good', { dropAt: points[1] }), 1200);
 }
 
-function endGame(won) {
+function endGame(won, text) {
   if (mode === 'over') return;
   if (document.pointerLockElement) document.exitPointerLock();
   if (possessed) { possessed.possessed = false; possessed.mesh.visible = true; possessed = null; }
   setMode('over');
   document.body.classList.remove('fps', 'scoped');
   $('overTitle').textContent = won ? 'Egg-cellent victory!' : 'Fried.';
-  $('overText').textContent = won ? `The hen coop is flattened after ${waveNum} waves. All the eggs are yours.` : `The hens took your barn during wave ${waveNum}.`;
+  $('overText').textContent = text || (won ? `The hen coop is flattened after ${waveNum} waves. All the eggs are yours.` : `The hens took your barn during wave ${waveNum}.`);
   setTimeout(() => $('over').classList.remove('hidden'), 900);
+}
+
+// ---------------------------------------------------------------- tactics mode
+function startTactics() {
+  tac.on = true;
+  document.body.classList.add('tactics');
+  // a smaller, fair fight: 6 birds vs 8 hens, no waves, no corn
+  for (const e of entities) if (!e.isBase && e.team === ENEMY) { e.dead = true; scene.remove(e.mesh); }
+  entities = entities.filter(e => !e.dead);
+  const hens = [['trooper', -14, -17], ['trooper', 14, -17], ['trooper', -4, -15], ['trooper', 4, -15], ['heavy', -9, -19], ['heavy', 9, -19], ['sniper', -2, -20], ['sniper', 2, -20]];
+  for (const [t, x, z] of hens) makeUnit(ENEMY, t, x, z);
+  enemyBase.shieldMesh.visible = false;
+  startGame(true);
+  startPlan();
+}
+
+function startPlan() {
+  if (mode === 'over') return;
+  if (possessed) exitFPS();
+  tac.phase = 'plan'; tac.round++;
+  document.body.classList.add('plan'); document.body.classList.remove('live');
+  if (!tac.hero || tac.hero.dead) tac.hero = playerUnits()[0] || null;
+  setTool('move');
+  enemyPlan();
+  const mine = playerUnits();
+  if (mine.length) { // frame the flock, looking toward the hens
+    rts.focus.set(mine.reduce((t, u) => t + u.x, 0) / mine.length * 0.5, 0, Math.max(-10, mine.reduce((t, u) => t + u.z, 0) / mine.length - 8));
+  }
+  if (camera.aspect < 1) rts.zoom = Math.max(rts.zoom, 46);
+  selection = mine; updateButtons();
+  radio(`Round ${tac.round}: give orders, pick your ★ hero, then press Go`, 'good');
+}
+
+function goLive() {
+  if (!tac.on || tac.phase !== 'plan' || mode !== 'rts') return;
+  tac.phase = 'live'; tac.t = ROUND_TIME; tac.rallyUsed = false;
+  document.body.classList.remove('plan'); document.body.classList.add('live');
+  setTool('move');
+  selection = []; updateButtons();
+  if (tac.hero && !tac.hero.dead) possess(tac.hero);
+}
+
+function updateRound(dt) {
+  if (tac.phase !== 'live') return;
+  tac.t -= dt;
+  if (tac.t > 0) return;
+  // round over: hold all 3 nests to win, lose all 3 to lose
+  const mine = points.filter(p => p.owner === PLAYER).length, theirs = points.filter(p => p.owner === ENEMY).length;
+  if (mine === points.length) { endGame(true, `You held all 3 nests at the end of round ${tac.round}.`); return; }
+  if (theirs === points.length) { endGame(false, `The hens held all 3 nests at the end of round ${tac.round}.`); return; }
+  startPlan();
+}
+
+// the hens plan at the same time as you: grab nests, hunt ducks, fall back when hurt
+function enemyPlan() {
+  const hens = entities.filter(e => !e.dead && !e.isBase && e.team === ENEMY);
+  const ducks = playerUnits();
+  const open = points.filter(p => p.owner !== ENEMY);
+  hens.forEach((h, i) => {
+    if (h.hp < h.maxHp * 0.35) { commandMove([h], h.x * 0.6, Math.max(-24, h.z - 8), 'amove', true); return; }
+    const near = (list) => list.slice().sort((a, b) => Math.hypot(a.x - h.x, a.z - h.z) - Math.hypot(b.x - h.x, b.z - h.z))[0];
+    const roll = (i + tac.round) % 3;
+    if (open.length && (roll !== 2 || !ducks.length)) {
+      const p = roll === 1 && open.length > 1 ? open[(i + tac.round) % open.length] : near(open);
+      commandMove([h], p.x + (Math.random() - 0.5) * 3, p.z + (Math.random() - 0.5) * 3, 'amove', true);
+    } else if (ducks.length && (roll === 2 || Math.random() < 0.5)) {
+      const d = near(ducks);
+      commandMove([h], d.x + (Math.random() - 0.5) * 4, d.z + (Math.random() - 0.5) * 4, 'amove', true);
+    } else {
+      h.order = { type: 'idle' }; h.path = null; // sit tight on what they have
+    }
+  });
+}
+
+function setTool(t) {
+  tac.tool = t;
+  const b = $('btnBomb'); if (b) b.classList.toggle('armed', t === 'bomb');
+  if (t === 'bomb') toast(isTouch ? 'Tap where the egg bomb lands' : 'Click where the egg bomb lands', 1.2);
+}
+function holdSelected() {
+  if (tac.phase !== 'plan') return;
+  const sel = liveSelection();
+  if (!sel.length) { toast('Select birds first', 1); return; }
+  for (const u of sel) { u.order = { type: 'idle' }; u.path = null; u.pathGoal = null; }
+  toast(`${sel.length} holding position`, 0.8);
+}
+function heroFromSelection() {
+  if (tac.phase !== 'plan') return;
+  const sel = liveSelection();
+  if (!sel.length) { toast('Select a bird to be your ★ hero', 1); return; }
+  possess(sel[0]); // in plan phase this marks the hero
+}
+
+function tacticsTap(ent, gp, sel, { secondary, shift, touch }) {
+  const planning = tac.phase === 'plan';
+  const order = planning && (secondary || (touch && sel.length && !(ent && ent.team === PLAYER)) || tac.tool === 'bomb');
+  if (order && sel.length) {
+    if (tac.tool === 'bomb') {
+      const ducks = sel.filter(u => u.type === 'trooper');
+      if (!ducks.length) toast('Only ducks carry egg bombs', 1.2);
+      else if (gp) { for (const u of ducks) { u.order = { type: 'bomb', x: gp.x, z: gp.z }; u.path = null; } ping(gp.x, gp.z, 0xffaa55, 2.2); }
+      setTool('move');
+      return;
+    }
+    if (ent && ent.team === ENEMY) commandAttack(sel, ent);
+    else if (gp) commandMove(sel, gp.x, gp.z, 'amove');
+    return;
+  }
+  if (!planning && (secondary || (touch && sel.length && !(ent && ent.team === PLAYER)))) { toast('Orders are locked until the round ends', 1); return; }
+  if (ent && ent.team === PLAYER && !ent.isBase) {
+    const now = performance.now();
+    if (lastTap.ent === ent && now - lastTap.t < 380) { lastTap.ent = null; possess(ent); return; }
+    lastTap = { ent, t: now };
+    if (shift) selection = selection.includes(ent) ? selection.filter(u => u !== ent) : [...selection, ent];
+    else selection = [ent];
+    updateButtons();
+    return;
+  }
+  if (!shift) { selection = []; updateButtons(); }
+}
+
+function throwEgg(u, x, z) {
+  const T = 0.9, y0 = 1.2;
+  const pos = new THREE.Vector3(u.x, y0, u.z);
+  const vel = new THREE.Vector3((x - u.x) / T, (0.15 - y0 + 0.5 * 20 * T * T) / T, (z - u.z) / T);
+  const mesh = noRay(new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({ color: 0xfff6e0 }))); mesh.scale.set(0.14, 0.18, 0.14);
+  scene.add(mesh);
+  grenades.push({ pos, vel, t: 0, mesh, src: u, noBox: true });
+  u.facing = facingFor(x - u.x, z - u.z);
+}
+
+function updateTacticsHud() {
+  const tag = $('modeTag');
+  if (tac.phase === 'plan') { tag.innerHTML = `<b>PLAN</b> round ${tac.round} · paused`; tag.className = 'plan'; }
+  else { tag.innerHTML = `<b>LIVE</b> ${Math.max(0, Math.ceil(tac.t))}s left${mode === 'fps' ? ' · you are the ★ hero' : ''}`; tag.className = 'op'; }
+  $('btnPossess').textContent = tac.hero && !tac.hero.dead ? 'Hero view ▶' : 'Hero down';
+  $('btnPossess').classList.toggle('off', !tac.hero || tac.hero.dead);
+}
+
+// planned paths, egg bomb targets and the hero star, drawn on top of the map
+function drawPlans() {
+  if (mode !== 'rts') return;
+  const proj = (x, z) => toScreen(x, 0.1, z);
+  octx.lineWidth = 2;
+  for (const u of playerUnits()) {
+    const o = u.order;
+    const a = proj(u.x, u.z);
+    if (o.type === 'bomb') {
+      const b = proj(o.x, o.z);
+      octx.setLineDash([4, 5]); octx.strokeStyle = '#ffaa55';
+      octx.beginPath(); octx.moveTo(a.x, a.y); octx.quadraticCurveTo((a.x + b.x) / 2, Math.min(a.y, b.y) - 60, b.x, b.y); octx.stroke();
+      octx.setLineDash([]);
+      octx.beginPath();
+      for (let k = 0; k <= 24; k++) { const t = k / 24 * Math.PI * 2; const q = proj(o.x + Math.cos(t) * 3.4, o.z + Math.sin(t) * 3.4); k ? octx.lineTo(q.x, q.y) : octx.moveTo(q.x, q.y); }
+      octx.stroke();
+    } else if ((o.type === 'amove' || o.type === 'move') && u.path && tac.phase === 'plan') {
+      octx.setLineDash([6, 6]); octx.strokeStyle = selection.includes(u) ? '#9dffc4' : 'rgba(157,255,196,.6)';
+      octx.beginPath(); octx.moveTo(a.x, a.y);
+      for (const p of u.path) { const q = proj(p.x, p.z); octx.lineTo(q.x, q.y); }
+      octx.stroke(); octx.setLineDash([]);
+      const end = proj(u.path[u.path.length - 1].x, u.path[u.path.length - 1].z);
+      octx.fillStyle = '#9dffc4'; octx.beginPath(); octx.arc(end.x, end.y, 4, 0, Math.PI * 2); octx.fill();
+    } else if (o.type === 'attack' && !o.target.dead && tac.phase === 'plan') {
+      const b = proj(o.target.x, o.target.z);
+      octx.strokeStyle = '#ff6a5a'; octx.setLineDash([3, 4]);
+      octx.beginPath(); octx.moveTo(a.x, a.y); octx.lineTo(b.x, b.y); octx.stroke(); octx.setLineDash([]);
+    } else if (o.type === 'idle' && tac.phase === 'plan') {
+      octx.fillStyle = 'rgba(255,255,255,.85)'; octx.font = '700 10px system-ui'; octx.textAlign = 'center';
+      octx.fillText('HOLD', a.x, a.y + 16);
+    }
+    if (u === tac.hero) {
+      const s = toScreen(u.x, 2.7, u.z);
+      octx.font = '900 20px system-ui'; octx.textAlign = 'center';
+      octx.lineWidth = 4; octx.strokeStyle = 'rgba(0,0,0,.6)'; octx.strokeText('★', s.x, s.y);
+      octx.fillStyle = '#ffd84a'; octx.fillText('★', s.x, s.y); octx.lineWidth = 2;
+    }
+  }
 }
 
 // ---------------------------------------------------------------- HUD drawing
@@ -1599,13 +1821,14 @@ function drawOverlay() {
     octx.fillRect(s.x - w / 2 - 1, s.y - 1, w + 2, h + 2);
     octx.fillStyle = e.elite ? '#ffc340' : e.team === PLAYER ? (k > 0.35 ? '#46e08a' : '#f0c040') : '#ff5a3c';
     octx.fillRect(s.x - w / 2, s.y, w * k, h);
-    if (e.isBase && e.shield) {
+    if (e.isBase && e.shield && !tac.on) {
       octx.strokeStyle = '#ffa080'; octx.lineWidth = 2; octx.strokeRect(s.x - w / 2 - 3, s.y - 3, w + 6, h + 6);
       octx.fillStyle = '#ffd0c0'; octx.font = '700 11px system-ui';
       octx.fillText(`EGGSHELL · hold ${points.length - playerPointCount()} more nest${points.length - playerPointCount() === 1 ? '' : 's'}`, s.x, s.y - 6);
     }
     if (e.armorT > 0) { octx.fillStyle = '#7fb8ff'; octx.fillRect(s.x - w / 2, s.y + h + 1, w, 2); }
   }
+  if (tac.on) drawPlans();
   if (boxSel) {
     octx.strokeStyle = '#5dff9a'; octx.lineWidth = 1.5;
     octx.fillStyle = 'rgba(93,255,154,.12)';
@@ -1656,10 +1879,12 @@ function drawMinimap() {
 }
 
 function updateHud(dt) {
+  if (tac.on) { updateTacticsHud(); if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) $('toast').classList.remove('show'); } }
   const pb = Math.max(0, Math.round(playerBase.hp / playerBase.maxHp * 100));
   const eb = Math.max(0, Math.round(enemyBase.hp / enemyBase.maxHp * 100));
   const dots = points.map(p => `${p.name}${p.owner === PLAYER ? '🦆' : p.owner === ENEMY ? '🐔' : '🥚'}`).join(' ');
-  $('status').textContent = `Nests ${dots} · Barn ${pb}% · Coop ${eb}%${enemyBase.shield ? ' (shelled)' : ' (CRACKED!)'} · Hens in ${Math.ceil(waveTimer)}s`;
+  if (tac.on) $('status').textContent = `Nests ${dots} · Ducks ${countUnits(PLAYER)} vs Hens ${countUnits(ENEMY)} · Round ${tac.round}`;
+  else $('status').textContent = `Nests ${dots} · Barn ${pb}% · Coop ${eb}%${enemyBase.shield ? ' (shelled)' : ' (CRACKED!)'} · Hens in ${Math.ceil(waveTimer)}s`;
   const income = CP_BASE + CP_PER_POINT * playerPointCount();
   $('cpText').textContent = `🌽 ${Math.floor(game.cp)}  (+${income.toFixed(1)}/s)`;
   for (const [id, t] of [['btnBuyTrooper', 'trooper'], ['btnBuyHeavy', 'heavy'], ['btnBuySniper', 'sniper']]) $(id).classList.toggle('off', game.cp < COSTS[t]);
@@ -1684,20 +1909,20 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (mode === 'rts' || mode === 'fps') {
+  if ((mode === 'rts' || mode === 'fps') && !(tac.on && tac.phase === 'plan')) {
     // slow motion during the drop-in: 25% speed, easing back over the last half second
     if (game.slowmo > 0) game.slowmo -= dt;
     const scale = game.slowmo > 0.5 ? 0.25 : game.slowmo > 0 ? 1 - 1.5 * game.slowmo : 1;
     const simDt = dt * scale;
     game.time += simDt;
-    game.cp = Math.min(CP_MAX, game.cp + (CP_BASE + CP_PER_POINT * playerPointCount()) * simDt);
+    if (!tac.on) game.cp = Math.min(CP_MAX, game.cp + (CP_BASE + CP_PER_POINT * playerPointCount()) * simDt);
     if (game.relink > 0) game.relink -= simDt;
     if (mode === 'fps') updateFPS(dt, simDt);
     for (const e of entities) if (!e.dead && !e.isBase) updateUnit(e, simDt);
     separate();
     updatePoints(simDt);
-    updateEnemyOrders(simDt);
-    updateBases(simDt);
+    if (tac.on) updateRound(simDt);
+    else { updateEnemyOrders(simDt); updateBases(simDt); }
     updateGrenades(simDt);
     entities = entities.filter(e => !e.dead);
     selection = selection.filter(e => !e.dead);
@@ -1733,4 +1958,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
+  tac, goLive, startTactics, toScreen,
 };

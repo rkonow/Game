@@ -16,7 +16,7 @@
   <div id="status"></div>
   <div id="meters">
     <span id="modeTag"></span>
-    <span id="cpText" title="Corn: earned over time, faster for each nest you hold">🌽 0</span>
+    <span id="cpText" class="live-only" title="Corn: earned over time, faster for each nest you hold">🌽 0</span>
   </div>
   <div id="radio"></div>
   <canvas id="minimap" width="150" height="150"></canvas>
@@ -26,10 +26,14 @@
   <div id="rtsBar" class="bar">
     <span id="selInfo">No units selected</span>
     <button id="btnAll" title="Select all army (Q)">Select all</button>
-    <button id="btnAMove" title="Attack-move: next click/tap (X)">Attack-move</button>
+    <button id="btnHold" class="tac-only" title="Stay put and shoot what comes into range (H)">Hold</button>
+    <button id="btnBomb" class="tac-only" title="Ducks lob an egg bomb at a spot (B)">🥚 Egg bomb</button>
+    <button id="btnHero" class="tac-only" title="Play this bird in first person during the round (F)">★ Hero</button>
+    <button id="btnAMove" class="live-only" title="Attack-move: next click/tap (X)">Attack-move</button>
     <button id="btnPossess" class="accent" title="Become a selected duck (F)">Drop in ▶</button>
+    <button id="btnGo" class="tac-only go" title="Start the round (Space / Enter)">Go ▶ 20s</button>
   </div>
-  <div id="powers" class="bar">
+  <div id="powers" class="bar live-only">
     <button id="btnBuyTrooper" title="Buy a duck (1)">🦆 Duck<small>20 corn</small></button>
     <button id="btnBuyHeavy" title="Buy a goose: tough, honk shield (2)">🪿 Goose<small>35 corn</small></button>
     <button id="btnBuySniper" title="Buy a heron: long range, scope (3)">🎯 Heron<small>30 corn</small></button>
@@ -81,7 +85,10 @@
       </div>
     </div>
     <p class="roles">Duck: egg bomb · Goose: honk shield · Heron: scope and beak shots · Watch out for the <b>Big Rooster</b> · Alerts have a <b>Drop in</b> button that takes you straight there</p>
-    <button id="btnStart" class="accent big">Waddle in!</button>
+    <div class="modes">
+      <div><button id="btnStart" class="accent big">Live battle</button><p>Real-time: command and drop in whenever you like. Hens attack in waves.</p></div>
+      <div><button id="btnStartTac" class="accent big">Tactics</button><p>Plan every move with the game paused, pick one ★ hero, then watch 20 seconds of live combat where you play the hero. Hold all 3 nests at the end of a round to win.</p></div>
+    </div>
   </div>
 </div>
 
