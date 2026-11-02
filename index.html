@@ -3,22 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#5c9e3c">
+<meta name="theme-color" content="#0b0f16">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Fowl Play</title>
+<title>Hivefall</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <canvas id="game"></canvas>
 <canvas id="overlay"></canvas>
 
-<div id="freeze"><span>❄ BATTLE FROZEN · PLAN YOUR TURN</span></div>
+<div id="freeze"><span>⏸ TACTICAL PAUSE · PLAN YOUR TURN</span></div>
 <div id="hud">
   <div id="topbar">
     <div id="status"></div>
     <div id="meters">
       <span id="modeTag"></span>
-      <span id="cpText" title="Corn: earned over time, faster for each nest you hold">🌽 0</span>
+      <span id="cpText" title="Ore: earned over time, faster for each relay you hold">💠 0</span>
     </div>
   </div>
   <div id="radio"></div>
@@ -28,26 +30,26 @@
   <!-- command panel: who is selected, what they can do, what you can buy -->
   <div id="cmdPanel">
     <div id="unitCard">
-      <div id="selInfo">No birds selected</div>
+      <div id="selInfo">No marines selected</div>
       <div id="portraits"></div>
     </div>
     <div id="rtsBar" class="cmdgrid">
       <button id="btnAll" title="Select all army (Q)"><i>👥</i><span>All</span><kbd>Q</kbd></button>
       <button id="btnHold" class="tac-only" title="Stay put and shoot what comes into range (H)"><i>✋</i><span>Hold</span><kbd>H</kbd></button>
-      <button id="btnBomb" class="tac-only" title="Ducks lob an egg bomb at a spot (B)"><i>🥚</i><span>Egg bomb</span><kbd>B</kbd></button>
-      <button id="btnUpgrade" class="tac-only" title="Upgrade the selected birds and towers, up to ★3 (U)"><i>⬆</i><span>Upgrade</span><kbd>U</kbd></button>
-      <button id="btnHero" class="tac-only" title="Play this bird in first person during the round (F)"><i>★</i><span>Hero</span><kbd>F</kbd></button>
+      <button id="btnBomb" class="tac-only" title="Marines throw a frag grenade at a spot (B)"><i>💣</i><span>Grenade</span><kbd>B</kbd></button>
+      <button id="btnUpgrade" class="tac-only" title="Upgrade the selected marines and turrets, up to ★3 (U)"><i>⬆</i><span>Upgrade</span><kbd>U</kbd></button>
+      <button id="btnHero" class="tac-only" title="Play this marine in first person during the round (F)"><i>★</i><span>Hero</span><kbd>F</kbd></button>
       <button id="btnAMove" class="live-only" title="Attack-move: next click/tap (X)"><i>⚔</i><span>Attack</span><kbd>X</kbd></button>
-      <button id="btnPossess" class="accent" title="Become a selected duck (F)"><i>🎯</i><span>Drop in</span><kbd>F</kbd></button>
+      <button id="btnPossess" class="accent" title="Take control of a selected marine (F)"><i>🎯</i><span>Drop in</span><kbd>F</kbd></button>
       <button id="btnGo" class="tac-only go" title="Start the round (Space / Enter)"><i>▶</i><span>Go · 20s</span><kbd>␣</kbd></button>
     </div>
     <div id="powers" class="tray">
-      <button id="btnBuyTrooper" title="Buy a duck (1)"><i>🦆</i><span>Duck</span><small>20</small><kbd>1</kbd></button>
-      <button id="btnBuyHeavy" title="Buy a goose: tough, honk shield (2)"><i>🪿</i><span>Goose</span><small>35</small><kbd>2</kbd></button>
-      <button id="btnBuySniper" title="Buy a heron: long range, scope (3)"><i>🦩</i><span>Heron</span><small>30</small><kbd>3</kbd></button>
-      <button id="btnBuy_turret" class="tac-only" title="Build a corn turret: shoots hens in range (4)"><i>🌽</i><span>Turret</span><small>40</small><kbd>4</kbd></button>
-      <button id="btnBuy_mortar" class="tac-only" title="Build an egg mortar: long-range splash (5)"><i>💣</i><span>Mortar</span><small>55</small><kbd>5</kbd></button>
-      <button id="btnBuy_scarecrow" class="tac-only" title="Build a scarecrow: slows hens around it (6)"><i>🧑‍🌾</i><span>Scarecrow</span><small>25</small><kbd>6</kbd></button>
+      <button id="btnBuyTrooper" title="Deploy a marine: rifle, frag grenade (1)"><i>🪖</i><span>Marine</span><small>20</small><kbd>1</kbd></button>
+      <button id="btnBuyHeavy" title="Deploy a juggernaut: heavy armor, energy wall (2)"><i>🛡️</i><span>Juggernaut</span><small>35</small><kbd>2</kbd></button>
+      <button id="btnBuySniper" title="Deploy a ranger: long range, scope (3)"><i>🎯</i><span>Ranger</span><small>30</small><kbd>3</kbd></button>
+      <button id="btnBuy_turret" class="tac-only" title="Build an autoturret: shoots aliens in range (4)"><i>🔫</i><span>Turret</span><small>40</small><kbd>4</kbd></button>
+      <button id="btnBuy_mortar" class="tac-only" title="Build a mortar: long-range splash (5)"><i>💥</i><span>Mortar</span><small>55</small><kbd>5</kbd></button>
+      <button id="btnBuy_scarecrow" class="tac-only" title="Build a stasis pylon: slows aliens around it (6)"><i>🌀</i><span>Stasis</span><small>25</small><kbd>6</kbd></button>
     </div>
   </div>
 
@@ -58,12 +60,12 @@
     <div id="vignette"></div>
     <div id="fpsTop" class="bar">
       <button id="btnExit" title="Back to command view (F / Tab)">◀ Command</button>
-      <button id="btnSwap" title="Jump into the next bird (E)">Swap bird</button>
-      <button id="btnRally" title="Send nearby birds where you aim (R)">Rally flock</button>
+      <button id="btnSwap" title="Jump into the next marine (C)">Swap marine</button>
+      <button id="btnRally" title="Send nearby marines where you aim (R)">Rally squad</button>
     </div>
     <div id="fpsHp"><div id="fpsHpFill"></div><span id="fpsHpText"></span></div>
     <div id="fpsActions" class="bar">
-      <button id="btnUlt" title="Ultimate: charges as you deal damage and hold nests (X)">★ 0%</button>
+      <button id="btnUlt" title="Ultimate: charges as you deal damage and hold relays (X)">★ 0%</button>
       <button id="btnAbility2" title="Ability 2 (E, or right click)">Ability 2</button>
       <button id="btnAbility" title="Ability 1 (Q)">Ability</button>
     </div>
@@ -75,33 +77,33 @@
 
 <div id="menu" class="screen">
   <div class="card">
-    <h1>🦆 Fowl Play 🥚</h1>
-    <p class="sub">Ducks vs. Hens: the Great Egg War</p>
-    <p class="lead">The hens hid behind a giant eggshell. Sit on the three nests <b>A B C</b> in the middle to crack it, then flatten their coop. <b>Only a duck you control in first person can claim a nest.</b></p>
+    <h1>HIVEFALL</h1>
+    <p class="sub">Marines vs. the Swarm · Kepler Mining Colony</p>
+    <p class="lead">The swarm's hive hides behind a bio-shield. Hold the three relays <b>A B C</b> in the middle to bring it down, then destroy the hive. <b>Only a marine you control in first person can capture a relay.</b></p>
     <div class="cols">
       <div>
         <h3>Commander (top view)</h3>
         <ul>
-          <li>Move your flock to guard the nests</li>
-          <li>Spend 🌽 corn on birds: <b>Duck</b>, <b>Goose</b>, <b>Heron</b>. Every nest you hold pays more corn</li>
-          <li class="desk">Desktop: click / drag to select, <b>right click</b> to move or attack, <b>1 2 3</b> buy, <b>F</b> or double-click to drop in</li>
+          <li>Move your squad to guard the relays. Drag from a marine to where it should go</li>
+          <li>Spend 💠 ore to deploy a <b>Marine</b>, <b>Juggernaut</b> or <b>Ranger</b>. Every relay you hold pays more ore</li>
+          <li class="desk">Desktop: click / drag to select, <b>right click</b> to move or attack, <b>1 2 3</b> deploy, <b>F</b> or double-click to drop in</li>
           <li>Touch: tap / drag to select, tap ground to move, two fingers pan and zoom, double-tap to drop in</li>
         </ul>
       </div>
       <div>
-        <h3>Duck mode (first person)</h3>
+        <h3>First person</h3>
         <ul>
-          <li>Sit on a nest to claim it · you deal <b>x2 damage</b></li>
+          <li>Stand on a relay to capture it · you deal <b>x2 damage</b></li>
           <li class="desk">Desktop: <b>WASD</b> + mouse, click to fire, <b>Q</b>/<b>E</b> abilities, <b>X</b> ultimate, <b>R</b> rally, <b>C</b> swap, <b>F</b>/<b>Tab</b> back</li>
           <li>Touch: left stick, drag right side to aim, hold <b>FIRE</b></li>
-          <li>If your duck gets cooked, wait 5s to drop in again</li>
+          <li>If your marine goes down, wait 5s to drop in again</li>
         </ul>
       </div>
     </div>
-    <p class="roles">Duck: egg bomb, dive roll, ★ duckling swarm · Goose: wing wall, charge, ★ the HONK · Heron: scope, stilt jump, ★ hawk eye · Watch out for the <b>Big Rooster</b> · Alerts have a <b>Drop in</b> button that takes you straight there</p>
+    <p class="roles">Marine: frag grenade, combat roll, ★ drone swarm · Juggernaut: energy wall, shield charge, ★ shockwave · Ranger: scope, jump jet, ★ recon scan · Watch out for the <b>Hive Tyrant</b> · Alerts have a <b>Drop in</b> button that takes you straight there</p>
     <div class="modes">
-      <div><button id="btnStart" class="accent big">Live battle</button><p>Real-time: command and drop in whenever you like. Hens attack in waves.</p></div>
-      <div><button id="btnStartTac" class="accent big">Tactics</button><p>Turn-based: the battle freezes between 20-second live rounds. Re-arrange your flock, buy birds, upgrade and build towers, then play one ★ hero live. Hold all 3 nests to crack the coop, then destroy it.</p></div>
+      <div><button id="btnStart" class="accent big">Live battle</button><p>Real-time: command and drop in whenever you like. The swarm attacks in waves.</p></div>
+      <div><button id="btnStartTac" class="accent big">Tactics</button><p>Turn-based: the battle pauses between 20-second live rounds. Reposition, deploy, upgrade and build turrets, then play one ★ hero live. Hold all 3 relays to break the shield, then destroy the hive.</p></div>
     </div>
     <button id="btnGfx" class="gfx" title="Fancy adds glow and colour grading. Fast is smoother on older phones.">✨ Graphics: fancy</button>
   </div>

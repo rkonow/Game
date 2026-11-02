@@ -415,3 +415,29 @@ body:not(.hasSel) #btnHold, body:not(.hasSel) #btnUpgrade, body:not(.hasSel) #bt
   .tray button span { display: none; }
   #selInfo { display: none; }
 }
+
+/* ================= sci-fi theme: Hivefall ================= */
+:root { --accent: #5fd0ff; --ours: #3fa9ff; --theirs: #b35cff; --panel: rgba(10, 16, 24, .78); --line: rgba(120, 200, 255, .22); }
+html, body { font-family: 'Rajdhani', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+.screen { background: radial-gradient(ellipse at 50% 30%, rgba(40, 20, 30, .35), rgba(5, 8, 14, .85)); }
+.card { background: linear-gradient(180deg, rgba(14, 22, 34, .94), rgba(8, 12, 20, .96)); color: #d8e6f2;
+  border: 1px solid rgba(95, 208, 255, .45); box-shadow: 0 0 0 1px rgba(95,208,255,.12) inset, 0 0 40px rgba(95, 208, 255, .15), 0 20px 50px rgba(0,0,0,.6); border-radius: 6px;
+  clip-path: polygon(0 14px, 14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%); }
+.card h1 { font-size: 46px; letter-spacing: .32em; color: #e8f6ff; text-shadow: 0 0 18px rgba(95, 208, 255, .8), 0 0 2px #fff; font-weight: 700; margin-left: .32em; }
+.card .sub { color: #ffb070; letter-spacing: .18em; text-transform: uppercase; font-size: 13px; font-weight: 700; }
+.card .lead, .cols ul, .roles, .modes p { color: #a9bccd; }
+.cols h3 { color: var(--accent); text-transform: uppercase; letter-spacing: .12em; font-size: 14px; }
+.card b { color: #fff; }
+button.big { background: linear-gradient(180deg, #1f6fa8, #144a74); color: #fff; border: 1px solid #5fd0ff; box-shadow: 0 0 16px rgba(95, 208, 255, .35);
+  border-radius: 4px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; }
+button.big:hover { background: linear-gradient(180deg, #2a84c4, #1a5a8a); }
+#btnGfx.gfx { background: rgba(255,255,255,.05); color: #a9bccd; border: 1px solid rgba(95,208,255,.3); border-radius: 4px; }
+#cmdPanel > div { border-radius: 6px; clip-path: polygon(0 8px, 8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%); }
+.cmdgrid button, .tray button { border-radius: 4px; font-family: inherit; letter-spacing: .03em; }
+#status > span, #meters > span { border-radius: 4px; }
+#cpText { color: #7fe0ff !important; }
+#crosshair { border-color: rgba(120, 220, 255, .9); }
+#modeTag { background: rgba(31, 111, 168, .9); } #modeTag.op { background: rgba(170, 60, 40, .9); } #modeTag.plan { background: rgba(40, 140, 90, .9); }
+#radio div { border-left-color: var(--accent); border-radius: 2px; }
+#fpsHpFill { background: linear-gradient(90deg, #2fa8d2, #8ae0ff); }
+#freeze { background: radial-gradient(ellipse at center, rgba(80,160,255,0) 55%, rgba(30,80,160,.4) 100%); box-shadow: inset 0 0 0 2px rgba(95,208,255,.6); }

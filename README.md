@@ -1,8 +1,9 @@
-# Fowl Play
+# Hivefall
 
-A quick browser prototype for one idea: **command a flock from a top-down RTS view, then drop into any bird and fight in first person**, without pausing the battle. Ducks vs. hens, fighting over eggs.
+A browser prototype for one idea: **command a squad from a top-down RTS view, then drop into any marine and fight in first person**, without pausing the battle. Colonial marines vs. an alien swarm on a dusty mining planet.
 
-Everything is original procedural art (simple shapes and canvas textures) built with [Three.js](https://threejs.org/) (vendored in `vendor/`, MIT). There is no build step.
+Everything is original procedural art (shapes plus generated colour and normal-map textures) built with [Three.js](https://threejs.org/) (vendored in `vendor/`, MIT). There is no build step.
+
 ## Run it
 
 Any static file server works. From the repo root:
@@ -16,56 +17,55 @@ To try it on a phone, open the same URL from a device on your network, or publis
 
 ## How it plays
 
-One loop: **sit on the nests, crack the shell, raid the coop.**
+One loop: **hold the relays, drop the shield, destroy the hive.**
 
-- Three nests **A B C** sit in the middle. **Only a duck you control in first person can claim a nest** (stand on it for ~3s). Hens claim nests just by standing on them, so you have to go back and defend.
-- Hold **all three** and the eggshell dome over the hen coop cracks; your flock charges the coop. Lose a nest and the shell comes back.
-- **Commander view:** move the flock and spend 🌽 corn on birds: **Duck** (20, egg bomb), **Goose** (35, tough, honk shield), **Heron** (30, long range, scope and beak shots). Corn trickles in, faster for every nest you hold.
-- **Duck mode (first person):** x2 damage while you're in control. Rally the flock to where you aim, or swap to another bird.
-- **Switching** is free any time, with a slow-motion swoop. If your bird gets cooked you wait 5s. Alerts ("Hens are pecking at nest B!") have a **Drop in** button that puts you in the nearest bird.
-- Hens attack in growing waves, each heading for a nest, and every ~90s the **Big Rooster** comes out to hunt the bird you're controlling.
+- Three comms relays **A B C** sit in the middle. **Only a marine you control in first person can capture a relay** (stand on it for ~3s). Aliens take relays just by standing on them, so you have to go back and defend.
+- Hold **all three** and the bio-shield over the hive goes down; your squad charges it. Lose a relay and the shield comes back.
+- **Commander view:** move the squad and spend 💠 ore: **Marine** (20, frag grenade), **Juggernaut** (35, heavy armour, energy wall), **Ranger** (30, long range, scope). Ore trickles in, faster for every relay you hold.
+- **First person:** x2 damage while you're in control. Rally the squad to where you aim, or swap to another marine.
+- **Switching** is free any time, with a slow-motion swoop. If your marine goes down you wait 5s. Alerts ("The swarm is hitting relay B!") have a **Drop in** button that puts you in the nearest marine.
+- The swarm (**Skitters**, armoured **Brutes**, acid-spitting **Spitters**) attacks in growing waves, each heading for a relay, and the **Hive Tyrant** comes out to hunt the marine you're controlling.
+- Marines are smart: they shoot while moving, stop to return fire, go after snipers, dodge grenades, focus the wounded and patch themselves up out of combat.
 
 ## Hero kits (first person)
 
-Each bird you control has two abilities on cooldowns and an ultimate (★) that charges while you deal damage, get kills, capture nests, and slowly over time. Ultimate charge stays on the bird, so in Tactics it carries over between rounds.
+Each marine you control has two abilities on cooldowns and an ultimate (★) that charges while you deal damage, get kills, capture relays, and slowly over time. Ultimate charge stays on the marine, so in Tactics it carries over between rounds.
 
-| Bird | Q | E (or right click) | ★ Ultimate (X) |
+| Marine | Q | E (or right click) | ★ Ultimate (X) |
 |---|---|---|---|
-| Duck | Egg bomb | Dive roll: quick dash, can't be hit | Duckling swarm: 5 ducklings run at hens and pop |
-| Goose | Wing wall: blocks hen fire in front of you | Charge: knocks hens over and stuns them | The HONK: stuns every hen in a cone for 3s |
-| Heron | Scope (headshots x2.5) | Stilt jump: leap onto hay bales and sheds | Hawk eye: hens marked through walls, shots pierce |
-
-AI ducks and hens throw the odd egg bomb too.
+| Marine | Frag grenade | Combat roll: quick dash, can't be hit | Drone swarm: 5 drones hunt aliens and detonate |
+| Juggernaut | Energy wall: blocks swarm fire in front of you | Shield charge: knocks aliens over and stuns them | Shockwave: stuns every alien in a cone for 3s |
+| Ranger | Scope (headshots x2.5) | Jump jet: leap onto containers and huts | Recon scan: aliens marked through walls, shots pierce |
 
 ## Tactics mode (turn-based + tower defense)
 
-Pick **Tactics** on the menu. The battle **freezes** between 20-second live rounds (bullets hang in the air, a grid appears).
+Pick **Tactics** on the menu. The battle **pauses** between 20-second live rounds.
 
-1. **Plan (frozen):** re-arrange your flock (tap/right-click to send birds somewhere, **Hold**, **🥚 Egg bomb**), spend corn in the shop, and pick one **★ Hero**.
-   - Buy birds: Duck 20, Goose 35, Heron 30 (keys 1-3).
-   - Build towers on your half: **Corn turret** 40 (shoots), **Egg mortar** 55 (long-range splash), **Scarecrow** 25 (slows hens around it) (keys 4-6).
-   - **⬆ Upgrade** selected birds and towers up to ★3: more health and damage, towers gain range (U).
-2. **Go:** 20 seconds of live combat. Everything acts on its orders at once while you play the hero in first person, with one rally call per round.
-3. **Between rounds:** +20 corn, +15 per nest you hold, +4 per hen plucked; your birds heal 25%. A new, bigger hen wave leaves the coop every round; from round 3 some raid your towers and barn, and every 5th round brings the Big Rooster.
+1. **Plan (paused):** drag from a marine to where it should go (a preview shows each spot, red if aliens can hit it), **Hold**, **Grenade**, spend ore and pick one **★ Hero**.
+   - Deploy: Marine 20, Juggernaut 35, Ranger 30 (keys 1-3).
+   - Build on your half: **Autoturret** 40, **Mortar** 55 (long-range splash), **Stasis pylon** 25 (slows aliens around it) (keys 4-6).
+   - **Upgrade** selected marines and turrets up to ★3 (U).
+2. **Go:** 20 seconds of live combat. Everything acts on its orders at once while you play the hero in first person.
+3. **Between rounds:** ore income, your marines heal 25%, and a bigger wave leaves the hive; every 5th round brings the Hive Tyrant.
 
-Win: hold all 3 nests to crack the coop's eggshell, then destroy the coop. Lose: your barn falls, or you have no birds and no corn to hatch more.
+Win: hold all 3 relays to drop the hive's bio-shield, then destroy the hive. Lose: your outpost falls, or you have no marines and no ore to deploy more.
 
 ## Controls
 
 | | Desktop | Touch |
 |---|---|---|
-| Select | Left click, drag a box, Shift to add, **Q** all, or click a portrait in the unit card | Tap a bird, drag a box, **All**, or tap a portrait |
-| Drag-to-move | Drag from a bird to a spot: a ghost preview shows where each bird lands and warns when hens can shoot there | Same, with one finger |
-| Move / attack | Right click ground / enemy, **X** then click for attack-move | Tap ground / enemy while birds are selected, **Attack-move** |
-| Buy birds | **1** duck, **2** goose, **3** heron | Buttons on the right |
+| Select | Left click, drag a box, Shift to add, **Q** all, or click a portrait in the unit card | Tap a marine, drag a box, **All**, or tap a portrait |
+| Drag-to-move | Drag from a marine to a spot: a ghost preview shows where each marine lands and warns when aliens can shoot there | Same, with one finger |
+| Move / attack | Right click ground / enemy, **X** then click for attack-move | Tap ground / enemy while marines are selected, **Attack-move** |
+| Deploy | **1** marine, **2** juggernaut, **3** ranger | Buttons in the bottom tray |
 | Camera | WASD / arrows, middle-drag, wheel zoom, click minimap | Two-finger pan, pinch zoom, tap minimap |
-| Drop in | **F** or double-click a bird | Double-tap a bird or **Drop in** |
+| Drop in | **F** or double-click a marine | Double-tap a marine or **Drop in** |
 | First person | WASD, mouse (pointer lock), click or Space to fire | Left stick, drag anywhere on the right to aim, hold **FIRE** (also aims while held); all at once, multitouch |
-| Extras | **Q**/**E** abilities, **X** ultimate, **R** rally, **C** swap, **F**/**Tab** back | Ability buttons and **★** above FIRE, **Rally flock**, **Swap bird**, **◀ Command** |
+| Extras | **Q**/**E** abilities, **X** ultimate, **R** rally, **C** swap, **F**/**Tab** back | Ability buttons and **★** above FIRE, **Rally squad**, **Swap marine**, **◀ Command** |
 
 ## Graphics
 
-Cartoon look: toon shading with ink outlines, a sky dome, swaying grass and wheat, a water shader on the pond, windmills, a silo, a farmhouse, hills and a drifting balloon. Birds blink, waddle, kick up dust, squash when hit and tumble when knocked out; held nests get a light column and confetti.
+Physically based materials lit by a low alien sun and an environment map baked from the procedural sky; generated colour and normal maps for regolith, rock, metal plates and corrugated containers. Around the colony: drill rigs, a refinery, habitat domes, a crashed freighter, mesas and a ringed gas giant. Units march and scuttle, kick up dust, flinch when hit and tumble when killed; held relays get a light column.
 
 **Fancy** graphics add bloom, colour grading and a vignette through a post-processing pass (`vendor/jsm`, three.js r170 addons). The menu toggle switches between fancy and fast, and the game drops to fast by itself if the frame rate stays low. Add `?fancy=1` or `?fancy=0` to the URL to force a mode.
 
@@ -73,7 +73,7 @@ Cartoon look: toon shading with ink outlines, a sky dome, swaying grass and whea
 
 - `index.html`, `style.css`: page, HUD and touch controls.
 - `vendor/`: three.js and the post-processing addons (imports rewritten to relative paths, no build step).
-- `src/main.js`: everything else: world, procedural farm art, birds and roles, nests and capture, A* pathfinding on a 1×1 grid, unit AI and hen waves, RTS input and shop, FPS possession and abilities, camera transitions, alerts, HUD and minimap.
+- `src/main.js`: everything else: world, procedural planet art, marines, aliens and roles, relays and capture, A* pathfinding on a 1×1 grid, unit AI and swarm waves, RTS input and shop, FPS possession and abilities, camera transitions, alerts, HUD and minimap.
 
 `window.__game` exposes a few hooks for automated smoke tests.
 
