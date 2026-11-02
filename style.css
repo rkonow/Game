@@ -503,4 +503,3 @@ button.big:hover { background: linear-gradient(180deg, #2a84c4, #1a5a8a); }
 #twist.show { animation: twistIn 3.2s ease-out forwards; }
 @keyframes twistIn { 0% { opacity: 0; transform: scale(1.6); } 10% { opacity: 1; transform: scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: scale(.96); } }
 #btnRetryCp { margin-right: 8px; }
-.story #powers { display: none; }

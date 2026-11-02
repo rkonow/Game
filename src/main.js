@@ -1684,6 +1684,13 @@ function onPointsChanged() {
 }
 
 function spawnPlayer(type) {
+  if (camp.m && camp.m.story && story.def) { // story maps: a dropship drops reinforcements at your last checkpoint
+    const [cx, cz] = story.def[story.checkpoint].cp;
+    const u = makeUnit(PLAYER, type, cx + (Math.random() - 0.5) * 3, cz + (Math.random() - 0.5) * 3);
+    smoke(u.x, 0.4, u.z, 1.6, 6);
+    radio(`Reinforcement ${NAMES[PLAYER][type].toLowerCase()} dropped at ${story.def[story.checkpoint].name}`, 'good', { dropAt: u });
+    return u;
+  }
   const u = makeUnit(PLAYER, type, (Math.random() - 0.5) * 3, 21.5);
   if (tac.on) { u.x = (Math.random() - 0.5) * 6; u.z = 19 + Math.random(); return u; } // ready to be ordered
   commandMove([u], (Math.random() - 0.5) * 8, 17 - Math.random() * 2, 'move', true);
@@ -1697,7 +1704,6 @@ function buy(type) {
     if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} ore`, 1); return; }
     setTool(tac.tool === 'place:' + type ? 'move' : 'place:' + type); return; // tapping the button again cancels
   }
-  if (camp.m && camp.m.story) { toast('No reinforcements out here. Keep your squad alive', 1.4); return; }
   if (countUnits(PLAYER) >= PLAYER_CAP) { toast('The squad is full', 1); return; }
   if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} ore`, 1); return; }
   game.cp -= COSTS[type];
@@ -3327,7 +3333,7 @@ const CAMP_KEY = 'hivefall.campaign';
 const MISSIONS = [
   { id: 'crash', name: 'Crash Site', where: 'Kepler canyons', kind: 'live', story: 'crash', squad: 4, ore: 0,
     goal: { type: 'story' }, goalText: 'Fight through the canyons to the colony relay and find the survivor',
-    twist: 'Story mission with checkpoints: if your squad is wiped out, you restart from the last one. No reinforcements.',
+    twist: 'Story mission with checkpoints: if your squad is wiped out, you restart from the last one. Ore buys reinforcements, dropped at your last checkpoint.',
     brief: 'The colony went dark three days ago. On approach, something hit our dropship. We are going down in the canyons, miles from anywhere.' },
   { id: 'holdline', name: 'Hold the Line', where: 'Refinery approach', kind: 'tactics', squad: 6, ore: 80,
     goal: { type: 'rounds', n: 6 }, goalText: 'Keep the outpost standing for 6 rounds',

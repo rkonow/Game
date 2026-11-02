@@ -39,7 +39,7 @@ One loop: **hold the relays, drop the shield, destroy the hive.**
 | 4 | Blackout | Live | Survive 3 minutes | Dust storm: very short sight lines |
 | 5 | Hivefall | Tactics | Destroy the hive | The Tyrant every 3 rounds |
 
-Story missions build their own map (canyon walls, camps) and run a script of objectives. Each checkpoint you reach is saved: if the squad is wiped out you restart from it with the same marines, and nobody is lost on a failed attempt. There are no reinforcements in story missions.
+Story missions build their own map (canyon walls, camps) and run a script of objectives. Each checkpoint you reach is saved: if the squad is wiped out you restart from it with the same marines, and nobody is lost on a failed attempt. Ore buys reinforcements, which a dropship drops at your last checkpoint.
 
 Your squad persists between missions. Every marine has a name and earns XP from kills and missions: Private → Corporal → Sergeant → Lieutenant, each rank adding health and damage. You pick who deploys in the briefing. **A marine killed in a mission is gone for good**, and the debrief lists kills, promotions and the fallen. Reinforcements you deploy and who survive join the roster, and fresh recruits keep the squad at six. Progress is saved in the browser; **New campaign** starts over.
 
