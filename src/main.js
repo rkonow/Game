@@ -15,9 +15,13 @@ const TYPES = {
   trooper: { hp: 60, speed: 4.2, range: 10, dmg: 7, rate: 0.45, radius: 0.45, acc: 0.7, ability: 'Egg bomb', abilityCd: 6 },
   heavy: { hp: 150, speed: 3.0, range: 8, dmg: 18, rate: 1.1, radius: 0.6, acc: 0.8, ability: 'Honk shield', abilityCd: 12 },
   sniper: { hp: 45, speed: 3.4, range: 16, dmg: 38, rate: 2.2, radius: 0.45, acc: 0.85, ability: 'Scope', abilityCd: 0 },
+  turret: { hp: 220, speed: 0, range: 12, dmg: 8, rate: 0.35, radius: 0.8, acc: 0.75 },
+  mortar: { hp: 180, speed: 0, range: 18, dmg: 45, rate: 3.2, radius: 0.8, acc: 1 },
+  scarecrow: { hp: 300, speed: 0, range: 6, dmg: 0, rate: 1, radius: 0.6, acc: 0 },
   elite: { hp: 450, speed: 4.4, range: 11, dmg: 12, rate: 0.25, radius: 0.75, acc: 0.8, ability: '', abilityCd: 0 },
 };
-const COSTS = { trooper: 20, heavy: 35, sniper: 30 };
+const COSTS = { trooper: 20, heavy: 35, sniper: 30, turret: 40, mortar: 55, scarecrow: 25 };
+const TOWERS = ['turret', 'mortar', 'scarecrow'];
 const POSSESS_DMG = 2.0;    // damage multiplier while you drive the unit
 const POSSESS_RATE = 0.6;   // fire-rate multiplier (lower = faster)
 const EYE = 1.45;
@@ -217,7 +221,7 @@ const bucketMat = new THREE.MeshStandardMaterial({ color: 0x9aa4ae, roughness: 0
 const strawMat = new THREE.MeshStandardMaterial({ color: 0xe6c66a, roughness: 1 });
 const BODY_COLORS = [0xffd84a, 0xf6f2ea];      // ducks are yellow, hens are white
 const NAMES = [
-  { trooper: 'Duck', heavy: 'Goose', sniper: 'Heron' },
+  { trooper: 'Duck', heavy: 'Goose', sniper: 'Heron', turret: 'Corn turret', mortar: 'Egg mortar', scarecrow: 'Scarecrow' },
   { trooper: 'Hen', heavy: 'Turkey', sniper: 'Pigeon', elite: 'Big Rooster' },
 ];
 const nameOf = u => NAMES[u.team][u.type];
@@ -348,6 +352,70 @@ function makeBase(team, x, z) {
   boxes.push(b.box);
   entities.push(b);
   return b;
+}
+
+// towers (Tactics only): immobile units on your half of the farm
+function makeTower(type, x, z) {
+  const t = TYPES[type];
+  const u = {
+    kind: 'unit', isTower: true, type, team: PLAYER, x, z, hp: t.hp, maxHp: t.hp, speed: 0, range: t.range,
+    dmg: t.dmg, rate: t.rate, radius: t.radius, acc: t.acc, facing: 0, cool: 0, abilityCd: 0, armorT: 0,
+    order: { type: 'idle' }, path: null, pathGoal: null, possessed: false, dead: false, flash: 0, lvl: 1,
+  };
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xb47c49, roughness: 0.8 });
+  u.bodyMat = bodyMat;
+  if (type === 'turret') {
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 0.9, 10), [hayMat, hayTopMat, hayTopMat]); base.position.y = 0.45;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.7), bodyMat); head.position.y = 1.15;
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 1.1, 8), darkMat); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 1.2, -0.7);
+    const hopper = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.4), visorMat); hopper.position.set(0, 1.55, 0.1);
+    g.add(base, head, barrel, hopper);
+    u.muzzleOffset = { side: 0, fwd: 1.25, y: 1.2 };
+  } else if (type === 'mortar') {
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 1.2), plankMat); crate.position.y = 0.35;
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 0.9, 12), bucketMat); tube.position.set(0, 1.0, -0.1); tube.rotation.x = -0.5;
+    const egg = new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({ color: 0xfff6e0 })); egg.scale.set(0.18, 0.24, 0.18); egg.position.set(0.45, 0.85, 0.35);
+    g.add(crate, tube, egg);
+    u.muzzleOffset = { side: 0, fwd: 0.3, y: 1.4 };
+  } else { // scarecrow: slows hens around it
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.2, 6), plankMat); post.position.y = 1.1;
+    const arms = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.1, 0.1), plankMat); arms.position.y = 1.55;
+    const shirt = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.3), new THREE.MeshStandardMaterial({ color: 0x3f7fd0 })); shirt.position.y = 1.35;
+    const head = new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({ color: 0xd9b37a })); head.scale.setScalar(0.28); head.position.y = 2.05;
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.04, 14), strawMat); brim.position.y = 2.28;
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.25, 12), strawMat); crown.position.y = 2.42;
+    g.add(post, arms, shirt, head, brim, crown);
+    const aura = noRay(new THREE.Mesh(new THREE.RingGeometry(5.7, 6, 48), new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.35, depthWrite: false })));
+    aura.rotation.x = -Math.PI / 2; aura.position.y = 0.06; g.add(aura);
+    u.muzzleOffset = { side: 0, fwd: 0, y: 1 };
+  }
+  tagMeshes(g, u);
+  const ring = noRay(new THREE.Mesh(new THREE.RingGeometry(u.radius + 0.12, u.radius + 0.28, 28), new THREE.MeshBasicMaterial({ color: 0x2dff7a, transparent: true, opacity: 0.95, depthWrite: false })));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.08; ring.visible = false; g.add(ring);
+  u.ring = ring; u.mesh = g;
+  g.position.set(x, 0, z); scene.add(g);
+  entities.push(u);
+  return u;
+}
+
+function updateTower(u, dt) {
+  if (u.type === 'scarecrow') { // scare and slow every hen nearby
+    for (const e of entities) if (!e.dead && !e.isBase && e.team === ENEMY && Math.hypot(e.x - u.x, e.z - u.z) < 6) e.slowT = 0.3;
+    u.facing += dt * 0.3;
+    return;
+  }
+  const target = findTarget(u, u.range);
+  if (!target || target.isBase) return;
+  u.facing = angleLerp(u.facing, facingFor(target.x - u.x, target.z - u.z), Math.min(1, dt * 8));
+  if (u.cool > 0) return;
+  if (u.type === 'mortar') {
+    const d = Math.hypot(target.x - u.x, target.z - u.z);
+    if (d < 4) return;
+    u.cool = u.rate;
+    lobEgg(u, target.x + (Math.random() - 0.5) * 1.5, target.z + (Math.random() - 0.5) * 1.5, 1.4, 3.4, u.dmg);
+    sfx('blast', u.x, u.z);
+  } else if (hasLOS(u, target)) aiShoot(u, target);
 }
 
 // ---------------------------------------------------------------- pathfinding grid
@@ -747,7 +815,7 @@ function radio(msg, kind = '', opts = {}) {
 
 // ---------------------------------------------------------------- orders
 function liveSelection() { return selection.filter(u => !u.dead && !u.possessed); }
-const playerUnits = () => entities.filter(e => !e.dead && !e.isBase && e.team === PLAYER);
+const playerUnits = () => entities.filter(e => !e.dead && !e.isBase && !e.isTower && e.team === PLAYER);
 
 function formationSpots(n, x, z) {
   const spots = [];
@@ -786,7 +854,7 @@ function moveAlong(u, dt) {
   if (!u.path || !u.path.length) return true;
   const p = u.path[0];
   const dx = p.x - u.x, dz = p.z - u.z, d = Math.hypot(dx, dz);
-  const step = u.speed * dt;
+  const step = u.speed * (u.slowT > 0 ? 0.4 : 1) * dt;
   const last = u.path.length === 1;
   if (d <= Math.max(step, last ? 0.35 : 0.25)) {
     u.x = p.x; u.z = p.z; u.path.shift();
@@ -888,8 +956,7 @@ function kill(e, src) {
   }
   if (tac.on) {
     if (e === possessed) { radio(`Your hero ${nameOf(e).toLowerCase()} got cooked. Watch the rest of the round.`, 'warn'); rts.focus.set(e.x, 0, e.z); possessed = null; exitFPS(); }
-    if (!countUnits(ENEMY)) endGame(true, `Every hen plucked in ${tac.round} round${tac.round === 1 ? '' : 's'}.`);
-    else if (!countUnits(PLAYER)) endGame(false, `Your flock was wiped out in round ${tac.round}.`);
+    if (e.team === ENEMY) { game.cp = Math.min(CP_MAX, game.cp + (e.elite ? 30 : 4)); if (!countUnits(ENEMY)) radio('Wave cleared! More hens come next round', 'good'); }
     return;
   }
   if (e.team === PLAYER && e === possessed) {
@@ -907,7 +974,9 @@ function updateUnit(u, dt) {
   u.abilityCd -= dt;
   u.armorT -= dt;
   u.invulnT = (u.invulnT || 0) - dt;
+  u.slowT = (u.slowT || 0) - dt;
   u.moving = false;
+  if (u.isTower) { updateTower(u, dt); return; }
   if (u.possessed) return;
   if (u.stunT > 0) { u.stunT -= dt; return; }
   const o = u.order;
@@ -953,7 +1022,9 @@ function separate() {
     if (d < min && d > 1e-4) {
       const push = (min - d);
       const nx = dx / d, nz = dz / d;
-      const wa = a.possessed ? 0 : (b.possessed ? 1 : 0.5), wb = 1 - wa;
+      const fa = a.possessed || a.isTower, fb = b.possessed || b.isTower;
+      if (fa && fb) continue;
+      const wa = fa ? 0 : (fb ? 1 : 0.5), wb = 1 - wa;
       a.x -= nx * push * wa; a.z -= nz * push * wa;
       b.x += nx * push * wb; b.z += nz * push * wb;
     }
@@ -961,7 +1032,7 @@ function separate() {
   for (const u of units) resolveCollision(u);
 }
 
-const countUnits = team => entities.reduce((n, e) => n + (!e.dead && !e.isBase && e.team === team ? 1 : 0), 0);
+const countUnits = team => entities.reduce((n, e) => n + (!e.dead && !e.isBase && !e.isTower && e.team === team ? 1 : 0), 0);
 
 // capture: only your possessed soldier captures for you; any enemy soldier captures for them
 function updatePoints(dt) {
@@ -1009,13 +1080,12 @@ function updatePoints(dt) {
 }
 
 function onPointsChanged() {
-  if (tac.on) return; // tactics wins by holding nests at the end of a round
   const all = playerPointCount() === points.length;
   if (all && enemyBase.shield) {
     enemyBase.shield = false; enemyBase.shieldMesh.visible = false;
     burst(enemyBase.x, 2, enemyBase.z, 5, 0xffa080);
     radio('All 3 nests are ours: the eggshell cracked! Raid the coop!', 'good');
-    commandMove(playerUnits().filter(e => !e.possessed), enemyBase.x, enemyBase.z + 6, 'amove', true);
+    if (!tac.on) commandMove(playerUnits().filter(e => !e.possessed), enemyBase.x, enemyBase.z + 6, 'amove', true);
     toast('Shell cracked! Raid the hen coop', 2.5);
   } else if (!all && !enemyBase.shield && !enemyBase.dead) {
     enemyBase.shield = true; enemyBase.shieldMesh.visible = true;
@@ -1025,12 +1095,18 @@ function onPointsChanged() {
 
 function spawnPlayer(type) {
   const u = makeUnit(PLAYER, type, (Math.random() - 0.5) * 3, 21.5);
+  if (tac.on) { u.x = (Math.random() - 0.5) * 6; u.z = 19 + Math.random(); return u; } // ready to be ordered
   commandMove([u], (Math.random() - 0.5) * 8, 17 - Math.random() * 2, 'move', true);
   return u;
 }
 
 function buy(type) {
-  if (mode !== 'rts' || tac.on) return;
+  if (mode !== 'rts' || (tac.on && tac.phase !== 'plan')) return;
+  if (TOWERS.includes(type)) {
+    if (!tac.on) return;
+    if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} corn`, 1); return; }
+    setTool('place:' + type); return;
+  }
   if (countUnits(PLAYER) >= PLAYER_CAP) { toast('The flock is full', 1); return; }
   if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} corn`, 1); return; }
   game.cp -= COSTS[type];
@@ -1121,9 +1197,9 @@ function updateGrenades(dt) {
     g.pos.addScaledVector(g.vel, dt);
     g.mesh.position.copy(g.pos);
     const inBox = (!g.noBox || g.vel.y < 0) && boxes.some(b => g.pos.y < 2 && g.pos.x > b.minX && g.pos.x < b.maxX && g.pos.z > b.minZ && g.pos.z < b.maxZ);
-    if (g.pos.y <= 0.15 || inBox || g.t > 2) {
+    if (g.pos.y <= 0.15 || inBox || g.t > 3) {
       scene.remove(g.mesh);
-      explode(g.pos.x, g.pos.z, 3.4, 60, g.src);
+      explode(g.pos.x, g.pos.z, g.r || 3.4, g.dmg || 60, g.src);
       grenades.splice(i, 1);
     }
   }
@@ -1167,7 +1243,7 @@ const raycaster = new THREE.Raycaster();
 const tmpV = new THREE.Vector3();
 
 function possess(u) {
-  if (!u || u.dead || u.isBase || u.team !== PLAYER) return;
+  if (!u || u.dead || u.isBase || u.isTower || u.team !== PLAYER) return;
   if (tac.on) {
     if (tac.phase === 'plan') { tac.hero = u; selection = [u]; updateButtons(); toast(`★ ${nameOf(u)} is your hero this round`, 1.2); return; }
     if (u !== tac.hero) { toast('Only your ★ hero can be played this round', 1.2); return; }
@@ -1774,6 +1850,13 @@ window.addEventListener('keydown', e => {
     else if (e.code === 'Escape') { setTool('move'); selection = []; updateButtons(); }
     else if (tac.phase === 'plan') {
       if (e.code === 'KeyH') holdSelected();
+      else if (e.code === 'Digit1') buy('trooper');
+      else if (e.code === 'Digit2') buy('heavy');
+      else if (e.code === 'Digit3') buy('sniper');
+      else if (e.code === 'Digit4') buy('turret');
+      else if (e.code === 'Digit5') buy('mortar');
+      else if (e.code === 'Digit6') buy('scarecrow');
+      else if (e.code === 'KeyU') upgradeSelected();
       else if (e.code === 'KeyB') setTool(tac.tool === 'bomb' ? 'move' : 'bomb');
       else if (e.code === 'KeyF') heroFromSelection();
       else if (e.code === 'Enter' || e.code === 'Space') goLive();
@@ -1893,6 +1976,8 @@ tapButton($('btnHold'), holdSelected);
 tapButton($('btnBomb'), () => setTool(tac.tool === 'bomb' ? 'move' : 'bomb'));
 tapButton($('btnHero'), heroFromSelection);
 tapButton($('btnGo'), goLive);
+tapButton($('btnUpgrade'), upgradeSelected);
+for (const ty of TOWERS) tapButton($('btnBuy_' + ty), () => buy(ty));
 tapButton($('btnRestart'), () => location.reload());
 
 function selectAll() {
@@ -1935,7 +2020,11 @@ function startGame(tactics = false) {
   rts.zoom = camera.aspect < 1 ? 42 : 30; // portrait phones need a wider view
   selection = playerUnits();
   updateButtons();
-  if (tactics) { toast(isTouch ? 'Tap birds, tap the ground to plan, then Go' : 'Select birds, right-click to plan, then Go (Space)', 3.5); return; }
+  if (tactics) {
+    toast(isTouch ? 'Tap birds, tap the ground to plan, then Go' : 'Select birds, right-click to plan, then Go (Space)', 3.5);
+    setTimeout(() => radio('Hold all 3 nests to crack the coop\'s shell, then destroy it. Build towers to guard your barn.', 'good'), 1500);
+    return;
+  }
   toast(isTouch ? 'Double-tap a duck to become it' : 'Double-click a duck (or press F) to become it', 3);
   setTimeout(() => radio('Only YOU can claim a nest: drop into a duck and sit on nest B', 'good', { dropAt: points[1] }), 1200);
 }
@@ -1952,6 +2041,41 @@ function endGame(won, text) {
 }
 
 // ---------------------------------------------------------------- tactics mode
+const planGrid = new THREE.GridHelper(N, N / 2, 0xffffff, 0xffffff);
+planGrid.material.transparent = true; planGrid.material.opacity = 0.16; planGrid.position.y = 0.04; planGrid.visible = false;
+scene.add(planGrid);
+
+const canPlace = (x, z) => z >= 4 && z <= 24 && Math.abs(x) <= 27 && isFree(toCell(x), toCell(z))
+  && !entities.some(e => !e.dead && Math.hypot(e.x - x, e.z - z) < (e.isBase ? 4.5 : 1.6))
+  && !points.some(p => Math.hypot(p.x - x, p.z - z) < POINT_R + 0.5);
+function placeTower(type, x, z) {
+  if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} corn`, 1); return false; }
+  x = Math.round(x * 2) / 2; z = Math.round(z * 2) / 2;
+  if (!canPlace(x, z)) { toast('Build on open ground on your side of the farm', 1.2); return false; }
+  game.cp -= COSTS[type];
+  const t = makeTower(type, x, z);
+  t.facing = Math.PI * 0; ping(x, z, 0x5dff9a, 1.6); sfx('chime');
+  return true;
+}
+const upgradeCost = u => 25 * (u.lvl || 1);
+function upgradeSelected() {
+  if (!tac.on || tac.phase !== 'plan') return;
+  const sel = liveSelection().filter(u => (u.lvl || 1) < 3);
+  if (!sel.length) { toast(liveSelection().length ? 'Already at max level' : 'Select birds or towers to upgrade', 1.2); return; }
+  let done = 0;
+  for (const u of sel) {
+    const c = upgradeCost(u);
+    if (game.cp < c) break;
+    game.cp -= c; done++;
+    u.lvl = (u.lvl || 1) + 1;
+    u.maxHp = Math.round(u.maxHp * 1.3); u.hp = u.maxHp;
+    u.dmg *= 1.25; if (u.isTower) u.range += 1.5;
+    u.mesh.scale.multiplyScalar(1.08);
+    burst(u.x, 1, u.z, 1.4, 0xffd84a);
+  }
+  if (done) { sfx('chime'); toast(`Upgraded ${done} to ★${sel[0].lvl}`, 1); } else toast(`Upgrade costs ${upgradeCost(sel[0])} corn`, 1);
+}
+
 function startTactics() {
   tac.on = true;
   document.body.classList.add('tactics');
@@ -1960,7 +2084,7 @@ function startTactics() {
   entities = entities.filter(e => !e.dead);
   const hens = [['trooper', -14, -17], ['trooper', 14, -17], ['trooper', -4, -15], ['trooper', 4, -15], ['heavy', -9, -19], ['heavy', 9, -19], ['sniper', -2, -20], ['sniper', 2, -20]];
   for (const [t, x, z] of hens) makeUnit(ENEMY, t, x, z);
-  enemyBase.shieldMesh.visible = false;
+  game.cp = 60;
   startGame(true);
   startPlan();
 }
@@ -1969,6 +2093,23 @@ function startPlan() {
   if (mode === 'over') return;
   if (possessed) exitFPS();
   tac.phase = 'plan'; tac.round++;
+  planGrid.visible = true;
+  if (tac.round > 1) {
+    // income, a breather for your birds, and a fresh hen wave from the coop
+    const held = points.filter(p => p.owner === PLAYER).length;
+    const income = 20 + 15 * held;
+    game.cp = Math.min(CP_MAX, game.cp + income);
+    for (const e of entities) if (!e.dead && e.team === PLAYER && !e.isBase) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.25);
+    const n = Math.min(2 + tac.round, ENEMY_CAP - countUnits(ENEMY));
+    for (let i = 0; i < n; i++) {
+      const type = i % 4 === 3 ? 'sniper' : i % 3 === 2 ? 'heavy' : 'trooper';
+      const h = makeUnit(ENEMY, type, (Math.random() - 0.5) * 10, -20 - Math.random() * 2);
+      if (tac.round >= 4) { h.maxHp = h.hp = Math.round(h.maxHp * (1 + (tac.round - 3) * 0.12)); }
+    }
+    if (tac.round % 5 === 0 && !entities.some(e => e.elite && !e.dead)) makeUnit(ENEMY, 'elite', 0, -20);
+    radio(`+${income} corn (${held} nest${held === 1 ? '' : 's'} held) · ${n} new hens${tac.round % 5 === 0 ? ' and the Big Rooster' : ''}`, 'good');
+    if (!playerUnits().length && game.cp < COSTS.trooper) { endGame(false, `No birds left and no corn to hatch more, round ${tac.round}.`); return; }
+  }
   document.body.classList.add('plan'); document.body.classList.remove('live');
   if (!tac.hero || tac.hero.dead) tac.hero = playerUnits()[0] || null;
   setTool('move');
@@ -1985,6 +2126,7 @@ function startPlan() {
 function goLive() {
   if (!tac.on || tac.phase !== 'plan' || mode !== 'rts') return;
   tac.phase = 'live'; tac.t = ROUND_TIME; tac.rallyUsed = false;
+  planGrid.visible = false;
   document.body.classList.remove('plan'); document.body.classList.add('live');
   setTool('move');
   selection = []; updateButtons();
@@ -1995,11 +2137,7 @@ function updateRound(dt) {
   if (tac.phase !== 'live') return;
   tac.t -= dt;
   if (tac.t > 0) return;
-  // round over: hold all 3 nests to win, lose all 3 to lose
-  const mine = points.filter(p => p.owner === PLAYER).length, theirs = points.filter(p => p.owner === ENEMY).length;
-  if (mine === points.length) { endGame(true, `You held all 3 nests at the end of round ${tac.round}.`); return; }
-  if (theirs === points.length) { endGame(false, `The hens held all 3 nests at the end of round ${tac.round}.`); return; }
-  startPlan();
+  startPlan(); // freeze: everything stops exactly where it is
 }
 
 // the hens plan at the same time as you: grab nests, hunt ducks, fall back when hurt
@@ -2011,6 +2149,11 @@ function enemyPlan() {
     if (h.hp < h.maxHp * 0.35) { commandMove([h], h.x * 0.6, Math.max(-24, h.z - 8), 'amove', true); return; }
     const near = (list) => list.slice().sort((a, b) => Math.hypot(a.x - h.x, a.z - h.z) - Math.hypot(b.x - h.x, b.z - h.z))[0];
     const roll = (i + tac.round) % 3;
+    const towers = entities.filter(e => e.isTower && !e.dead);
+    if (tac.round >= 3 && i % 4 === 3) { // raiders: go for a tower, or straight at the barn
+      const t = towers.length ? near(towers) : playerBase;
+      commandMove([h], t.x + (Math.random() - 0.5) * 2, t.z - 2, 'amove', true); return;
+    }
     if (open.length && (roll !== 2 || !ducks.length)) {
       const p = roll === 1 && open.length > 1 ? open[(i + tac.round) % open.length] : near(open);
       commandMove([h], p.x + (Math.random() - 0.5) * 3, p.z + (Math.random() - 0.5) * 3, 'amove', true);
@@ -2026,7 +2169,9 @@ function enemyPlan() {
 function setTool(t) {
   tac.tool = t;
   const b = $('btnBomb'); if (b) b.classList.toggle('armed', t === 'bomb');
+  for (const ty of TOWERS) { const e = $('btnBuy_' + ty); if (e) e.classList.toggle('armed', t === 'place:' + ty); }
   if (t === 'bomb') toast(isTouch ? 'Tap where the egg bomb lands' : 'Click where the egg bomb lands', 1.2);
+  if (t.startsWith('place:')) toast(`${isTouch ? 'Tap' : 'Click'} your side of the farm to build the ${NAMES[PLAYER][t.slice(6)]}`, 1.4);
 }
 function holdSelected() {
   if (tac.phase !== 'plan') return;
@@ -2044,6 +2189,12 @@ function heroFromSelection() {
 
 function tacticsTap(ent, gp, sel, { secondary, shift, touch }) {
   const planning = tac.phase === 'plan';
+  if (planning && tac.tool.startsWith('place:') && !secondary) {
+    const type = tac.tool.slice(6);
+    if (gp && placeTower(type, gp.x, gp.z) && !shift) setTool('move');
+    return;
+  }
+  sel = sel.filter(u => !u.isTower);
   const order = planning && (secondary || (touch && sel.length && !(ent && ent.team === PLAYER)) || tac.tool === 'bomb');
   if (order && sel.length) {
     if (tac.tool === 'bomb') {
@@ -2070,20 +2221,24 @@ function tacticsTap(ent, gp, sel, { secondary, shift, touch }) {
   if (!shift) { selection = []; updateButtons(); }
 }
 
-function throwEgg(u, x, z) {
-  const T = 0.9, y0 = 1.2;
+function throwEgg(u, x, z) { lobEgg(u, x, z, 0.9); }
+function lobEgg(u, x, z, T, r = 3.4, dmg = 60) {
+  const y0 = 1.2;
   const pos = new THREE.Vector3(u.x, y0, u.z);
   const vel = new THREE.Vector3((x - u.x) / T, (0.15 - y0 + 0.5 * 20 * T * T) / T, (z - u.z) / T);
   const mesh = noRay(new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({ color: 0xfff6e0 }))); mesh.scale.set(0.14, 0.18, 0.14);
   scene.add(mesh);
-  grenades.push({ pos, vel, t: 0, mesh, src: u, noBox: true });
+  grenades.push({ pos, vel, t: 0, mesh, src: u, noBox: true, r, dmg });
   u.facing = facingFor(x - u.x, z - u.z);
 }
 
 function updateTacticsHud() {
   const tag = $('modeTag');
-  if (tac.phase === 'plan') { tag.innerHTML = `<b>PLAN</b> round ${tac.round} · paused`; tag.className = 'plan'; }
+  if (tac.phase === 'plan') { tag.innerHTML = `<b>PLAN</b> round ${tac.round} · battle frozen`; tag.className = 'plan'; }
   else { tag.innerHTML = `<b>LIVE</b> ${Math.max(0, Math.ceil(tac.t))}s left${mode === 'fps' ? ' · you are the ★ hero' : ''}`; tag.className = 'op'; }
+  const sel = liveSelection().filter(u => (u.lvl || 1) < 3);
+  $('btnUpgrade').textContent = sel.length ? `⬆ Upgrade (${sel.reduce((t, u) => t + upgradeCost(u), 0)})` : '⬆ Upgrade';
+  for (const ty of TOWERS) $('btnBuy_' + ty).classList.toggle('off', game.cp < COSTS[ty]);
   $('btnPossess').textContent = tac.hero && !tac.hero.dead ? 'Hero view ▶' : 'Hero down';
   $('btnPossess').classList.toggle('off', !tac.hero || tac.hero.dead);
 }
@@ -2165,7 +2320,7 @@ function drawOverlay() {
   for (const e of entities) {
     if (e.dead || e.possessed) continue;
     const selected = selection.includes(e);
-    if (!(selected || e.hp < e.maxHp || e.isBase || e.elite || e.stunT > 0)) continue;
+    if (!(selected || e.hp < e.maxHp || e.isBase || e.elite || e.stunT > 0 || e.lvl > 1)) continue;
     const s = toScreen(e.x, e.isBase ? 5.8 : e.elite ? 2.8 : 2.0, e.z);
     if (s.behind || s.x < -50 || s.x > innerWidth + 50 || s.y < -20 || s.y > innerHeight + 20) continue;
     if (mode === 'fps' && Math.hypot(e.x - camera.position.x, e.z - camera.position.z) > 45) continue;
@@ -2175,13 +2330,14 @@ function drawOverlay() {
     octx.fillRect(s.x - w / 2 - 1, s.y - 1, w + 2, h + 2);
     octx.fillStyle = e.elite ? '#ffc340' : e.team === PLAYER ? (k > 0.35 ? '#46e08a' : '#f0c040') : '#ff5a3c';
     octx.fillRect(s.x - w / 2, s.y, w * k, h);
-    if (e.isBase && e.shield && !tac.on) {
+    if (e.isBase && e.shield) {
       octx.strokeStyle = '#ffa080'; octx.lineWidth = 2; octx.strokeRect(s.x - w / 2 - 3, s.y - 3, w + 6, h + 6);
       octx.fillStyle = '#ffd0c0'; octx.font = '700 11px system-ui';
       octx.fillText(`EGGSHELL · hold ${points.length - playerPointCount()} more nest${points.length - playerPointCount() === 1 ? '' : 's'}`, s.x, s.y - 6);
     }
     if (e.armorT > 0) { octx.fillStyle = '#7fb8ff'; octx.fillRect(s.x - w / 2, s.y + h + 1, w, 2); }
     if (e.stunT > 0) { octx.font = '14px system-ui'; octx.fillText('💫', s.x, s.y - 6); }
+    if (e.lvl > 1) { octx.font = '700 10px system-ui'; octx.fillStyle = '#ffd84a'; octx.fillText('★'.repeat(e.lvl - 1), s.x, s.y - 3); }
   }
   if (tac.on) drawPlans();
   if (hawk.t > 0 && mode === 'fps') { // hens marked through walls
@@ -2263,10 +2419,10 @@ function updateHud(dt) {
   const pb = Math.max(0, Math.round(playerBase.hp / playerBase.maxHp * 100));
   const eb = Math.max(0, Math.round(enemyBase.hp / enemyBase.maxHp * 100));
   const dots = points.map(p => `${p.name}${p.owner === PLAYER ? '🦆' : p.owner === ENEMY ? '🐔' : '🥚'}`).join(' ');
-  if (tac.on) $('status').textContent = `Nests ${dots} · Ducks ${countUnits(PLAYER)} vs Hens ${countUnits(ENEMY)} · Round ${tac.round}`;
+  if (tac.on) $('status').textContent = `Nests ${dots} · Barn ${pb}% · Coop ${eb}%${enemyBase.shield ? ' (shelled)' : ' (CRACKED!)'} · Ducks ${countUnits(PLAYER)} vs Hens ${countUnits(ENEMY)}`;
   else $('status').textContent = `Nests ${dots} · Barn ${pb}% · Coop ${eb}%${enemyBase.shield ? ' (shelled)' : ' (CRACKED!)'} · Hens in ${Math.ceil(waveTimer)}s`;
   const income = CP_BASE + CP_PER_POINT * playerPointCount();
-  $('cpText').textContent = `🌽 ${Math.floor(game.cp)}  (+${income.toFixed(1)}/s)`;
+  $('cpText').textContent = tac.on ? `🌽 ${Math.floor(game.cp)} corn` : `🌽 ${Math.floor(game.cp)}  (+${income.toFixed(1)}/s)`;
   for (const [id, t] of [['btnBuyTrooper', 'trooper'], ['btnBuyHeavy', 'heavy'], ['btnBuySniper', 'sniper']]) $(id).classList.toggle('off', game.cp < COSTS[t]);
   $('btnPossess').textContent = game.relink > 0 ? `Drop in (${Math.ceil(game.relink)}s)` : 'Drop in ▶';
   $('btnPossess').classList.toggle('off', game.relink > 0);
@@ -2353,5 +2509,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
-  tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings,
+  tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
 };

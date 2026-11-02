@@ -37,15 +37,18 @@ Each bird you control has two abilities on cooldowns and an ultimate (★) that 
 
 AI ducks and hens throw the odd egg bomb too.
 
-## Tactics mode
+## Tactics mode (turn-based + tower defense)
 
-Pick **Tactics** on the menu for a turn-based take on the same battle (6 birds vs 8 hens, no waves, no corn):
+Pick **Tactics** on the menu. The battle **freezes** between 20-second live rounds (bullets hang in the air, a grid appears).
 
-1. **Plan** with the game paused: select birds and tap/right-click to send them somewhere (they fight on the way), **Hold** to stay put, or **🥚 Egg bomb** (ducks only) to lob an egg at a spot. Planned paths are drawn on the map. Pick one **★ Hero**.
-2. **Go**: 20 seconds of live combat. Everyone acts on their orders at once, the hens on theirs (they plan at the same time: grab nests, hunt ducks, fall back when hurt). You play the hero in first person and get one radio call (**Rally**) per round.
-3. Repeat. Orders not finished carry over to the next round.
+1. **Plan (frozen):** re-arrange your flock (tap/right-click to send birds somewhere, **Hold**, **🥚 Egg bomb**), spend corn in the shop, and pick one **★ Hero**.
+   - Buy birds: Duck 20, Goose 35, Heron 30 (keys 1-3).
+   - Build towers on your half: **Corn turret** 40 (shoots), **Egg mortar** 55 (long-range splash), **Scarecrow** 25 (slows hens around it) (keys 4-6).
+   - **⬆ Upgrade** selected birds and towers up to ★3: more health and damage, towers gain range (U).
+2. **Go:** 20 seconds of live combat. Everything acts on its orders at once while you play the hero in first person, with one rally call per round.
+3. **Between rounds:** +20 corn, +15 per nest you hold, +4 per hen plucked; your birds heal 25%. A new, bigger hen wave leaves the coop every round; from round 3 some raid your towers and barn, and every 5th round brings the Big Rooster.
 
-Win by holding all 3 nests at the end of a round, or by plucking every hen. Lose if the hens hold all 3 nests at the end of a round, or your flock is wiped out. Desktop keys in the plan phase: **H** hold, **B** egg bomb, **F** hero, **Space**/**Enter** go.
+Win: hold all 3 nests to crack the coop's eggshell, then destroy the coop. Lose: your barn falls, or you have no birds and no corn to hatch more.
 
 ## Controls
 
