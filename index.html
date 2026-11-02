@@ -14,6 +14,11 @@
 
 <div id="hud">
   <div id="status"></div>
+  <div id="meters">
+    <div class="meter" title="Overdrive: fills while commanding, drains while possessing"><div id="odFill"></div><span id="odText">OVERDRIVE</span></div>
+    <span id="cpText" title="Command points for artillery, cover and reinforcements">CP 0</span>
+  </div>
+  <div id="radio"></div>
   <canvas id="minimap" width="150" height="150"></canvas>
   <div id="toast"></div>
 
@@ -24,9 +29,15 @@
     <button id="btnAMove" title="Attack-move: next click/tap (X)">Attack-move</button>
     <button id="btnPossess" class="accent" title="Take control of a selected unit (F)">Possess ▶</button>
   </div>
+  <div id="powers" class="bar">
+    <button id="btnArty" data-cost="40" title="Artillery strike on a visible area (1)">Artillery<small>40 CP</small></button>
+    <button id="btnCover" data-cost="15" title="Drop a cover wall (2)">Cover<small>15 CP</small></button>
+    <button id="btnReinf" data-cost="50" title="Instant squad at your post (3)">Reinforce<small>50 CP</small></button>
+  </div>
 
   <!-- FPS controls -->
   <div id="fpsUI">
+    <div id="scope"></div>
     <div id="crosshair"></div>
     <div id="vignette"></div>
     <div id="fpsTop" class="bar">
@@ -35,6 +46,12 @@
       <button id="btnRally" title="Order your squad to attack where you aim (R)">Rally squad</button>
     </div>
     <div id="fpsHp"><div id="fpsHpFill"></div><span id="fpsHpText"></span></div>
+    <div id="plantBar"><div id="plantFill"></div><span>Planting charge…</span></div>
+    <button id="btnPlant" title="Plant a charge on the enemy post's shield (G)">Plant charge (G)</button>
+    <div id="fpsActions" class="bar">
+      <button id="btnAbility" title="Role ability (Q)">Ability</button>
+      <button id="btnMark" title="Mark the target under your crosshair for the whole army (T)">Mark</button>
+    </div>
     <div id="lockHint">Click to aim · Esc frees the mouse</div>
     <div id="stick" class="touch-only"><div id="knob"></div></div>
     <button id="btnFire" class="touch-only">FIRE</button>
@@ -44,7 +61,7 @@
 <div id="menu" class="screen">
   <div class="card">
     <h1>Vanguard Shift</h1>
-    <p class="lead">Command your squad from above, then drop into any soldier and fight in first person. Possessed soldiers deal double damage. Destroy the red command post.</p>
+    <p class="lead">Command from above, then drop into any soldier. The command view only sees what your units see, and the red post is shielded: only a soldier you control can plant a charge to drop it. Possessing burns <b>Overdrive</b> (x2 damage), which recharges while you command.</p>
     <div class="cols">
       <div>
         <h3>Desktop</h3>
@@ -54,7 +71,8 @@
           <li><b>X</b> then click: attack-move · <b>Q</b> select all</li>
           <li><b>WASD / arrows</b>, middle-drag pan · <b>wheel</b> zoom</li>
           <li><b>F</b> or double-click a unit: possess</li>
-          <li>In FPS: <b>WASD</b> move, <b>mouse</b> aim, <b>click</b> fire, <b>R</b> rally squad, <b>E</b> swap, <b>F</b>/<b>Tab</b> back</li>
+          <li><b>1 / 2 / 3</b> artillery, cover, reinforce (command points)</li>
+          <li>In FPS: <b>WASD</b> move, <b>mouse</b> aim, <b>click</b> fire, <b>Q</b> role ability, <b>T</b> mark target, <b>G</b> plant charge, <b>R</b> rally squad, <b>E</b> swap, <b>F</b>/<b>Tab</b> back</li>
         </ul>
       </div>
       <div>
@@ -64,10 +82,12 @@
           <li>With units selected, <b>tap</b> ground to move, an enemy to attack</li>
           <li><b>Two fingers</b> pan and pinch-zoom</li>
           <li><b>Double-tap</b> a unit or press <b>Possess</b></li>
-          <li>In FPS: left <b>stick</b> moves, drag right side to aim, hold <b>FIRE</b></li>
+          <li>Power buttons on the right: artillery, cover, reinforce</li>
+          <li>In FPS: left <b>stick</b> moves, drag right side to aim, hold <b>FIRE</b>, plus <b>Ability</b> and <b>Mark</b></li>
         </ul>
       </div>
     </div>
+    <p class="roles"><b>Roles</b> · Trooper: frag grenade · Heavy: armor up · Scout: dash, long sight · Sniper: scope, headshots · Medic: heals, revives fallen allies</p>
     <button id="btnStart" class="accent big">Deploy</button>
   </div>
 </div>

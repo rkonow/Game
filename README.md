@@ -17,11 +17,17 @@ To try it on a phone, open the same URL from a device on your network, or publis
 
 ## How it plays
 
-- You (blue) and the enemy (red) each have a command post. Destroy the red one to win.
-- Your post sends a reinforcement every 9 seconds. The enemy attacks in growing waves down three lanes.
-- Units fight on their own: idle units engage anything nearby, and hit units fire back.
-- **Possess** a soldier to take direct control. While possessed, it deals **2× damage and fires faster**, so dropping in at the right moment turns fights. If the possessed soldier dies you snap back to command view.
-- From first person you can still lead: **Rally** sends your selected squad (or nearby units) to attack-move to wherever you aim.
+The core loop is switching views, and each view can do things the other can't.
+
+- **Command view only sees what your units see.** Fog of war hides enemies outside your army's sight. Enemy snipers outrange your sight and shoot from the dark.
+- **First person reveals and leads.** Any hidden enemy you look at becomes visible to the whole army for a few seconds (scouts spot further, scoped snipers further still). **Mark (T)** an enemy so every unit focuses it. **Rally (R)** sends your squad to wherever you aim.
+- **Overdrive** fills while you command and drains while you possess (x2 damage, faster fire). You need 30% to drop in, kills refund some, and at 0 you are pulled back out. If your soldier dies the link breaks: you lose 25% and wait 8s to relink.
+- **The enemy post is shielded.** Only a soldier you control can disable it: get next to it and **plant a charge (G)**. The shield stays down for 25s and the whole army rushes in.
+- **Command-only powers** spend command points (CP), which build over time and from kills: **Artillery** (needs vision on the target), **Cover** walls, and instant **Reinforcements**.
+- **The drop-in is a moment:** the camera swoops down onto the soldier while the battle runs in slow motion. A radio feed tells you what's happening elsewhere ("Squad under fire behind you", "Command post under attack!").
+- **Roles** each play differently in first person: Trooper (frag grenade), Heavy (armor up, half damage), Scout (dash, long sight), Sniper (scope, headshots x2.5), Medic (heal beam, heal pulse, revives fallen allies). Downed allies leave a green marker for 14s that a medic can revive.
+- **The enemy commander mirrors you.** Every ~80s it drops into a gold **elite** soldier that hunts whichever unit you're controlling. You get a 5-second warning; killing it pays out Overdrive and CP.
+- Your post sends a reinforcement every 9s, cycling through all roles. The enemy attacks in growing waves down three lanes.
 
 ## Controls
 
@@ -29,21 +35,21 @@ To try it on a phone, open the same URL from a device on your network, or publis
 |---|---|---|
 | Select | Left click, drag a box, Shift to add, **Q** all | Tap a unit, drag a box, **Select all** |
 | Move / attack | Right click ground / enemy, Ctrl+right click or **X** for attack-move | Tap ground / enemy while units are selected, **Attack-move** button |
+| Powers | **1** artillery, **2** cover, **3** reinforce | Buttons on the right |
 | Camera | WASD / arrows, middle-drag, wheel zoom, click minimap | Two-finger pan, pinch zoom, tap minimap |
 | Possess | **F** or double-click a unit | Double-tap a unit or **Possess** |
 | FPS move / aim / fire | WASD, mouse (pointer lock), click or Space | Left stick, drag right side, hold **FIRE** |
-| FPS extras | **R** rally, **E** swap unit, **F**/**Tab** back | **Rally squad**, **Swap unit**, **◀ Command** |
+| FPS extras | **Q** ability, **T** mark, **G** plant, **R** rally, **E** swap, **F**/**Tab** back | **Ability**, **Mark**, **Plant charge**, **Rally squad**, **Swap unit**, **◀ Command** |
 
 ## Code map
 
 - `index.html`, `style.css`: page, HUD and touch controls.
-- `src/main.js`: everything else: world, units, A* pathfinding on a 1×1 grid, unit AI, RTS input, FPS possession, camera transitions, HUD and minimap.
+- `src/main.js`: everything else: world, units and roles, A* pathfinding and fog of war on a 1×1 grid, unit AI, RTS input and powers, FPS possession and abilities, camera transitions, radio, HUD and minimap.
 
 `window.__game` exposes a few hooks for automated smoke tests.
 
 ## Ideas for next steps
 
-- Hold-to-zoom aim and cover/crouch in FPS mode.
-- More unit roles (medic, scout with longer sight) and fog of war, so possessing a scout reveals the map.
+- Crouch/cover in FPS and line-of-sight-based fog (walls block vision).
 - Resources and building, to make the RTS half deeper.
 - Network play: one player commands, others possess units.

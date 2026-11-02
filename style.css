@@ -116,3 +116,72 @@ body.touch .touch-only { display: block; }
   #selInfo { width: 100%; text-align: center; padding: 4px; font-size: 12px; }
   #rtsBar button { flex: 1; min-width: 0; font-size: 13px; }
 }
+
+/* ---- v2: meters, powers, radio, FPS actions ---- */
+#meters {
+  position: absolute; top: calc(30px + env(safe-area-inset-top)); left: 12px; display: flex; gap: 10px; align-items: center;
+}
+.meter {
+  position: relative; width: 170px; height: 16px; background: rgba(0,0,0,.6); border-radius: 8px; overflow: hidden;
+  border: 1px solid rgba(127,184,255,.5);
+}
+#odFill { height: 100%; width: 0; background: linear-gradient(90deg, #2f7fd6, #7fe0ff); transition: width .15s; }
+.meter.low #odFill { background: #5a6676; }
+#odText { position: absolute; inset: 0; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-align: center; line-height: 14px; }
+#cpText { font-weight: 800; color: #ffd36a; text-shadow: 0 1px 3px #000; }
+
+#powers {
+  right: calc(8px + env(safe-area-inset-right)); top: 50%; transform: translateY(-50%); flex-direction: column; align-items: stretch;
+}
+#powers button { display: flex; flex-direction: column; align-items: center; padding: 6px 10px; min-width: 96px; }
+#powers small { font-weight: 600; color: #ffd36a; font-size: 11px; }
+#powers button.off { opacity: .45; }
+body.fps #powers { display: none; }
+
+#radio {
+  position: absolute; top: calc(108px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 3px; max-width: 60vw;
+}
+#radio div {
+  background: rgba(10,14,20,.75); border-left: 3px solid #7fb8ff; padding: 3px 10px; border-radius: 4px;
+  font-size: 12px; font-weight: 600; white-space: nowrap; transition: opacity .6s;
+}
+#radio div.warn { border-color: #ff8a6a; color: #ffd0c0; }
+#radio div.good { border-color: #46e08a; }
+#radio div.fade { opacity: 0; }
+
+#fpsTop { top: calc(56px + env(safe-area-inset-top)); }
+#fpsActions { right: calc(28px + env(safe-area-inset-right)); bottom: calc(176px + env(safe-area-inset-bottom)); flex-direction: column; align-items: flex-end; }
+body.desktop #fpsActions { bottom: calc(44px + env(safe-area-inset-bottom)); }
+#fpsActions button { min-width: 104px; }
+#fpsActions button.cd { opacity: .45; }
+#btnPlant {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(48px + env(safe-area-inset-bottom));
+  display: none; background: #c4492e; border-color: #ff8a6a;
+}
+body.canplant #btnPlant { display: block; }
+#plantBar {
+  position: absolute; left: 50%; top: 60%; transform: translateX(-50%); width: 220px; height: 20px; display: none;
+  background: rgba(0,0,0,.7); border-radius: 10px; overflow: hidden; border: 1px solid #ff8a6a;
+}
+#plantBar span { position: absolute; inset: 0; text-align: center; font-size: 12px; font-weight: 700; line-height: 18px; }
+#plantFill { height: 100%; width: 0; background: #c4492e; }
+body.planting #plantBar { display: block; }
+#scope {
+  position: absolute; inset: 0; display: none;
+  background: radial-gradient(circle at center, rgba(0,0,0,0) 32vmin, rgba(0,0,0,.92) 33vmin);
+}
+body.scoped #scope { display: block; }
+body.scoped #crosshair { width: 60vmin; height: 60vmin; margin: -30vmin 0 0 -30vmin; border-color: rgba(0,0,0,.6);
+  background: linear-gradient(#000,#000) center/1px 100% no-repeat, linear-gradient(#000,#000) center/100% 1px no-repeat; }
+.roles { color: #b9c7d8; font-size: 13px; margin: 12px 0 0; }
+
+@media (max-width: 600px) {
+  #meters { top: calc(44px + env(safe-area-inset-top)); }
+  .meter { width: 120px; }
+  #fpsTop { top: calc(72px + env(safe-area-inset-top)); }
+  #radio { top: calc(128px + env(safe-area-inset-top)); left: auto; right: 8px; transform: none; align-items: flex-end; max-width: calc(100vw - 150px); }
+  #radio div { white-space: normal; }
+  #powers { top: 42%; }
+  #powers button { min-width: 84px; font-size: 12px; }
+}
