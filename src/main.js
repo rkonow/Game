@@ -1660,7 +1660,7 @@ function buy(type) {
   if (TOWERS.includes(type)) {
     if (!tac.on) return;
     if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} ore`, 1); return; }
-    setTool('place:' + type); return;
+    setTool(tac.tool === 'place:' + type ? 'move' : 'place:' + type); return; // tapping the button again cancels
   }
   if (countUnits(PLAYER) >= PLAYER_CAP) { toast('The squad is full', 1); return; }
   if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} ore`, 1); return; }
@@ -2745,7 +2745,7 @@ const canPlace = (x, z) => z >= 4 && z <= 24 && Math.abs(x) <= 27 && isFree(toCe
 function placeTower(type, x, z) {
   if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} ore`, 1); return false; }
   x = Math.round(x * 2) / 2; z = Math.round(z * 2) / 2;
-  if (!canPlace(x, z)) { toast('Build on open ground on your side of the farm', 1.2); return false; }
+  if (!canPlace(x, z)) { toast('Build on open ground on your half of the map', 1.2); return false; }
   game.cp -= COSTS[type];
   const t = makeTower(type, x, z);
   t.facing = Math.PI * 0; ping(x, z, 0x5dff9a, 1.6); sfx('chime');
@@ -2865,7 +2865,7 @@ function setTool(t) {
   const b = $('btnBomb'); if (b) b.classList.toggle('armed', t === 'bomb');
   for (const ty of TOWERS) { const e = $('btnBuy_' + ty); if (e) e.classList.toggle('armed', t === 'place:' + ty); }
   if (t === 'bomb') toast(isTouch ? 'Tap where the grenade lands' : 'Click where the grenade lands', 1.2);
-  if (t.startsWith('place:')) toast(`${isTouch ? 'Tap' : 'Click'} your side of the farm to build the ${NAMES[PLAYER][t.slice(6)]}`, 1.4);
+  if (t.startsWith('place:')) toast(`${isTouch ? 'Tap' : 'Click'} your half of the map to build the ${NAMES[PLAYER][t.slice(6)]}`, 1.4);
 }
 function holdSelected() {
   if (tac.phase !== 'plan') return;
@@ -2883,10 +2883,15 @@ function heroFromSelection() {
 
 function tacticsTap(ent, gp, sel, { secondary, shift, touch }) {
   const planning = tac.phase === 'plan';
-  if (planning && tac.tool.startsWith('place:') && !secondary) {
-    const type = tac.tool.slice(6);
-    if (gp && placeTower(type, gp.x, gp.z) && !shift) setTool('move');
-    return;
+  if (planning && tac.tool.startsWith('place:')) {
+    // tapping a unit, or right-clicking, cancels building so the board never gets stuck in build mode
+    if (secondary) { setTool('move'); return; }
+    if (ent && ent.team === PLAYER) setTool('move');
+    else {
+      const type = tac.tool.slice(6);
+      if (gp && placeTower(type, gp.x, gp.z) && !shift) setTool('move');
+      return;
+    }
   }
   sel = sel.filter(u => !u.isTower);
   const order = planning && (secondary || (touch && sel.length && !(ent && ent.team === PLAYER)) || tac.tool === 'bomb');
