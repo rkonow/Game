@@ -23,7 +23,7 @@ const TYPES = {
   turret: { hp: 220, speed: 0, range: 12, dmg: 8, rate: 0.35, radius: 0.8, acc: 0.75 },
   mortar: { hp: 180, speed: 0, range: 18, dmg: 45, rate: 3.2, radius: 0.8, acc: 1 },
   scarecrow: { hp: 300, speed: 0, range: 6, dmg: 0, rate: 1, radius: 0.6, acc: 0 },
-  elite: { hp: 450, speed: 4.4, range: 11, dmg: 12, rate: 0.25, radius: 0.75, acc: 0.8, ability: '', abilityCd: 0 },
+  elite: { hp: 450, speed: 4.0, range: 11, dmg: 12, rate: 0.4, radius: 0.75, acc: 0.8, ability: '', abilityCd: 0 },
 };
 const COSTS = { trooper: 20, heavy: 35, sniper: 30, turret: 40, mortar: 55, scarecrow: 25 };
 const TOWERS = ['turret', 'mortar', 'scarecrow'];
@@ -35,6 +35,9 @@ const RELINK_CD = 5;        // wait after your soldier dies
 const CP_BASE = 1, CP_PER_POINT = 1.5, CP_MAX = 200, CP_START = 40;
 const POINT_DEFS = [['A', -17, 0], ['B', 0, 0], ['C', 17, 0]];
 const POINT_R = 3;
+const REGEN_DELAY = 4, REGEN_RATE = 0.1; // ducks heal 10% of max hp per second once out of combat
+const PLAYER_HP = 1.25;     // your birds are a bit tougher than the hens
+const VISION = 17;          // idle and attack-moving birds react to enemies this close
 
 // ---------------------------------------------------------------- renderer / scene
 const canvas = document.getElementById('game');
@@ -593,7 +596,7 @@ function blob(mat, sx, sy, sz, x, y, z) {
 function makeUnit(team, type, x, z) {
   const t = TYPES[type];
   const u = {
-    kind: 'unit', type, team, x, z, hp: t.hp, maxHp: t.hp, speed: t.speed, range: t.range,
+    kind: 'unit', type, team, x, z, hp: t.hp * (team === PLAYER ? PLAYER_HP : 1), maxHp: t.hp * (team === PLAYER ? PLAYER_HP : 1), speed: t.speed, range: t.range,
     dmg: t.dmg, rate: t.rate, radius: t.radius, acc: t.acc,
     facing: team === PLAYER ? 0 : Math.PI, cool: Math.random() * t.rate, abilityCd: 0, armorT: 0,
     order: { type: 'idle' }, path: null, pathGoal: null, possessed: false, dead: false, flash: 0,
@@ -1211,7 +1214,7 @@ let selection = [];
 let possessed = null;
 let amoveArmed = false;
 let waveTimer = 16, waveNum = 0;
-let eliteTimer = 75, eliteWarned = false;
+let eliteTimer = 100, eliteWarned = false;
 let playerBase, enemyBase;
 const grenades = [];
 const game = { cp: CP_START, relink: 0, slowmo: 0, time: 0 };
@@ -1330,6 +1333,11 @@ function findTarget(u, range) {
     if (d > range) continue;
     let s = d + (e.isBase ? 8 : 0) + (hasLOS(u, e) ? 0 : 4);
     if (u.elite && e.possessed) s -= 12; // the enemy elite hunts your soldier
+    if (u.team === PLAYER && !e.isBase) { // smarter ducks: finish off the wounded, answer whoever shoots them, stay in range
+      s -= (1 - e.hp / e.maxHp) * 5;
+      if (e === u.lastHitBy) s -= 3;
+      if (d <= u.range) s -= 3;
+    }
     if (s < bs) { bs = s; best = e; }
   }
   return best;
@@ -1386,10 +1394,13 @@ function damage(t, amount, src) {
   }
   if (t.armorT > 0) amount *= 0.5;
   t.hp -= amount;
+  t.hurtAt = game.time;
   t.flash = 0.12;
   if (t.possessed) { fps.hurt = 0.5; fps.shake = Math.min(0.3, fps.shake + 0.06); }
   if (t === playerBase) radio('Our barn is under attack!', 'warn', { key: 'base', gap: 10, dropAt: playerBase });
-  if (!tac.on && !t.isBase && !t.possessed && t.order.type === 'idle' && src && src.kind === 'unit' && !src.dead) t.order = { type: 'attack', target: src, auto: true };
+  if (src && src.kind === 'unit') t.lastHitBy = src;
+  // snipers out of reach: an idle bird goes after them (otherwise it just picks the best target nearby)
+  if (!tac.on && !t.isBase && !t.possessed && t.order.type === 'idle' && src && src.kind === 'unit' && !src.dead && distTo(t, src) > t.range + 4 && !findTarget(t, t.range + 4)) t.order = { type: 'attack', target: src, auto: true };
   if (t.hp <= 0) kill(t, src);
 }
 
@@ -1433,26 +1444,34 @@ function updateUnit(u, dt) {
   u.invulnT = (u.invulnT || 0) - dt;
   u.slowT = (u.slowT || 0) - dt;
   u.moving = false;
+  // ducks patch themselves up after 4s out of the fight
+  if (u.team === PLAYER && u.hp < u.maxHp && game.time - (u.hurtAt ?? -99) > REGEN_DELAY) u.hp = Math.min(u.maxHp, u.hp + u.maxHp * REGEN_RATE * dt);
   if (u.isTower) { updateTower(u, dt); return; }
   if (u.possessed) return;
   if (u.stunT > 0) { u.stunT -= dt; return; }
+  if (dodgeEggs(u, dt)) return;
   const o = u.order;
   if (o.type === 'bomb') { // walk until in throwing range, then lob an egg bomb
     if (Math.hypot(o.x - u.x, o.z - u.z) <= 10) { throwEgg(u, o.x, o.z); u.order = { type: 'idle' }; }
-    else { pathTo(u, o.x, o.z); moveAlong(u, dt); }
+    else { pathTo(u, o.x, o.z); moveAlong(u, dt); fireOnTheMove(u); }
     return;
   }
+  if (o.type !== 'idle') u.anchor = null;
   let target = null;
   if (o.type === 'attack') {
     if (o.target.dead) u.order = { type: 'idle' };
     else target = o.target;
+  } else if (o.type === 'move' && u.team === PLAYER) {
+    // a moving duck stops to shoot back at anything in range, then carries on to where you sent it
+    const t = findTarget(u, u.range);
+    if (t && !(t.isBase && t.shield) && hasLOS(u, t)) target = t;
   } else if (o.type === 'idle' || o.type === 'amove') {
-    target = findTarget(u, u.range + 4);
+    target = findTarget(u, Math.max(u.range + 4, VISION)); // react to anything that can shoot us, snipers included
   }
   if (target) {
     const d = distTo(u, target);
     // AI ducks and hens lob an egg bomb now and then (a simpler version of your ability)
-    if (u.type === 'trooper' && u.abilityCd <= 0 && !target.isBase && d > 4 && d < 10) { u.abilityCd = 9 + Math.random() * 5; throwEgg(u, target.x, target.z); }
+    if (u.type === 'trooper' && u.abilityCd <= 0 && !target.isBase && d > 4 && d < 10) { u.abilityCd = 9 + Math.random() * 5; lobEgg(u, target.x, target.z, 0.9, 3, 35); }
     if (d <= u.range && hasLOS(u, target)) {
       u.path = null; u.pathGoal = null;
       u.facing = angleLerp(u.facing, facingFor(target.x - u.x, target.z - u.z), Math.min(1, dt * 12));
@@ -1460,15 +1479,58 @@ function updateUnit(u, dt) {
       return;
     }
     if (o.auto && d > u.range + 8) { u.order = { type: 'idle' }; return; }
-    if (tac.on && o.type === 'idle') return; // in tactics, idle means hold this spot
+    if (tac.on && o.type === 'idle') { // in tactics, idle means hold this spot: step out a little to answer fire, never wander
+      if (!u.anchor) u.anchor = { x: u.x, z: u.z };
+      if (u.lastHitBy === target && Math.hypot(u.x - u.anchor.x, u.z - u.anchor.z) < 5) { pathTo(u, target.x, target.z); moveAlong(u, dt); fireOnTheMove(u); }
+      return;
+    }
     pathTo(u, target.x, target.z);
     moveAlong(u, dt);
+    fireOnTheMove(u);
     return;
   }
   if (o.type === 'move' || o.type === 'amove') {
     pathTo(u, o.x, o.z);
     if (moveAlong(u, dt)) u.order = { type: 'idle' };
+    fireOnTheMove(u);
+  } else if (tac.on && o.type === 'idle' && u.anchor && Math.hypot(u.x - u.anchor.x, u.z - u.anchor.z) > 0.8) {
+    pathTo(u, u.anchor.x, u.anchor.z); moveAlong(u, dt); // walk back to the held spot
   }
+}
+
+// see an egg bomb coming and hop out of the blast. Ducks always try; hens only sometimes, so your bombs still land.
+function dodgeEggs(u, dt) {
+  if (u.dodgeT > 0) {
+    u.dodgeT -= dt;
+    const dx = u.dodgeX - u.x, dz = u.dodgeZ - u.z, d = Math.hypot(dx, dz), step = u.speed * 1.5 * dt;
+    if (d > 0.05) { const k = Math.min(1, step / d); u.x += dx * k; u.z += dz * k; u.facing = angleLerp(u.facing, facingFor(dx, dz), Math.min(1, dt * 12)); u.moving = true; resolveCollision(u); }
+    fireOnTheMove(u);
+    if (d <= 0.05) u.dodgeT = 0;
+    return true;
+  }
+  for (const g of grenades) {
+    if (g.tx === undefined || !g.src || g.src.team === u.team) continue;
+    if (!g.seen) g.seen = new Set();
+    if (g.seen.has(u)) continue;
+    g.seen.add(u);
+    const r = (g.r || 3.4) + 0.5, dx = u.x - g.tx, dz = u.z - g.tz, d = Math.hypot(dx, dz);
+    if (d > r || (u.team === ENEMY && Math.random() > 0.3)) continue;
+    const nx = d > 0.1 ? dx / d : Math.random() - 0.5, nz = d > 0.1 ? dz / d : Math.random() - 0.5, nl = Math.hypot(nx, nz) || 1;
+    u.dodgeX = Math.max(-HALF + 1, Math.min(HALF - 1, g.tx + nx / nl * r)); u.dodgeZ = Math.max(-HALF + 1, Math.min(HALF - 1, g.tz + nz / nl * r));
+    u.dodgeT = 0.9; u.path = null; u.pathGoal = null;
+    return true;
+  }
+  return false;
+}
+
+// birds shoot at anything in range while they walk (a bit less accurately), instead of ignoring it
+function fireOnTheMove(u) {
+  if (u.cool > 0) return;
+  const t = findTarget(u, u.range);
+  if (!t || (t.isBase && t.shield) || !hasLOS(u, t)) return;
+  const acc = u.acc; if (u.team === ENEMY) u.acc *= 0.8;
+  const f = u.facing; aiShoot(u, t); u.facing = f;
+  u.acc = acc;
 }
 
 function separate() {
@@ -2687,7 +2749,7 @@ function lobEgg(u, x, z, T, r = 3.4, dmg = 60) {
   const vel = new THREE.Vector3((x - u.x) / T, (0.15 - y0 + 0.5 * 20 * T * T) / T, (z - u.z) / T);
   const mesh = noRay(new THREE.Mesh(sphere, toon({ color: 0xfff6e0 }))); mesh.scale.set(0.14, 0.18, 0.14);
   scene.add(mesh);
-  grenades.push({ pos, vel, t: 0, mesh, src: u, noBox: true, r, dmg });
+  grenades.push({ pos, vel, t: 0, mesh, src: u, noBox: true, r, dmg, tx: x, tz: z });
   u.facing = facingFor(x - u.x, z - u.z);
 }
 
@@ -2939,6 +3001,24 @@ function animateBird(e, dt, now) {
 }
 
 // ---------------------------------------------------------------- main loop
+function simulate(simDt, dt) {
+  game.time += simDt;
+  if (!tac.on) game.cp = Math.min(CP_MAX, game.cp + (CP_BASE + CP_PER_POINT * playerPointCount()) * simDt);
+  if (game.relink > 0) game.relink -= simDt;
+  if (mode === 'fps') updateFPS(dt, simDt);
+  for (const e of entities) if (!e.dead && !e.isBase) updateUnit(e, simDt);
+  separate();
+  updatePoints(simDt);
+  if (tac.on) updateRound(simDt);
+  else { updateEnemyOrders(simDt); updateBases(simDt); }
+  updateGrenades(simDt);
+  updateBullets(simDt);
+  updateWall(simDt);
+  updateDucklings(simDt);
+  hawk.t -= simDt;
+  entities = entities.filter(e => !e.dead);
+  selection = selection.filter(e => !e.dead);
+}
 setupWorld();
 let last = performance.now();
 function frame(now) {
@@ -2948,23 +3028,7 @@ function frame(now) {
     // slow motion during the drop-in: 25% speed, easing back over the last half second
     if (game.slowmo > 0) game.slowmo -= dt;
     const scale = game.slowmo > 0.5 ? 0.25 : game.slowmo > 0 ? 1 - 1.5 * game.slowmo : 1;
-    const simDt = dt * scale;
-    game.time += simDt;
-    if (!tac.on) game.cp = Math.min(CP_MAX, game.cp + (CP_BASE + CP_PER_POINT * playerPointCount()) * simDt);
-    if (game.relink > 0) game.relink -= simDt;
-    if (mode === 'fps') updateFPS(dt, simDt);
-    for (const e of entities) if (!e.dead && !e.isBase) updateUnit(e, simDt);
-    separate();
-    updatePoints(simDt);
-    if (tac.on) updateRound(simDt);
-    else { updateEnemyOrders(simDt); updateBases(simDt); }
-    updateGrenades(simDt);
-    updateBullets(simDt);
-    updateWall(simDt);
-    updateDucklings(simDt);
-    hawk.t -= simDt;
-    entities = entities.filter(e => !e.dead);
-    selection = selection.filter(e => !e.dead);
+    simulate(dt * scale, dt);
   }
   for (const e of entities) {
     if (e.dead) continue;
@@ -3007,5 +3071,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
-  scene, camera, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
+  scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
 };
