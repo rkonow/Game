@@ -14,34 +14,41 @@
 
 <div id="freeze"><span>❄ BATTLE FROZEN · PLAN YOUR TURN</span></div>
 <div id="hud">
-  <div id="status"></div>
-  <div id="meters">
-    <span id="modeTag"></span>
-    <span id="cpText" title="Corn: earned over time, faster for each nest you hold">🌽 0</span>
+  <div id="topbar">
+    <div id="status"></div>
+    <div id="meters">
+      <span id="modeTag"></span>
+      <span id="cpText" title="Corn: earned over time, faster for each nest you hold">🌽 0</span>
+    </div>
   </div>
   <div id="radio"></div>
   <canvas id="minimap" width="150" height="150"></canvas>
   <div id="toast"></div>
 
-  <!-- RTS controls -->
-  <div id="rtsBar" class="bar">
-    <span id="selInfo">No units selected</span>
-    <button id="btnAll" title="Select all army (Q)">Select all</button>
-    <button id="btnHold" class="tac-only" title="Stay put and shoot what comes into range (H)">Hold</button>
-    <button id="btnBomb" class="tac-only" title="Ducks lob an egg bomb at a spot (B)">🥚 Egg bomb</button>
-    <button id="btnUpgrade" class="tac-only" title="Upgrade the selected birds and towers, up to ★3 (U)">⬆ Upgrade</button>
-    <button id="btnHero" class="tac-only" title="Play this bird in first person during the round (F)">★ Hero</button>
-    <button id="btnAMove" class="live-only" title="Attack-move: next click/tap (X)">Attack-move</button>
-    <button id="btnPossess" class="accent" title="Become a selected duck (F)">Drop in ▶</button>
-    <button id="btnGo" class="tac-only go" title="Start the round (Space / Enter)">Go ▶ 20s</button>
-  </div>
-  <div id="powers" class="bar">
-    <button id="btnBuyTrooper" title="Buy a duck (1)">🦆 Duck<small>20 corn</small></button>
-    <button id="btnBuyHeavy" title="Buy a goose: tough, honk shield (2)">🪿 Goose<small>35 corn</small></button>
-    <button id="btnBuySniper" title="Buy a heron: long range, scope (3)">🎯 Heron<small>30 corn</small></button>
-    <button id="btnBuy_turret" class="tac-only" title="Build a corn turret: shoots hens in range (4)">🌽 Turret<small>40 corn</small></button>
-    <button id="btnBuy_mortar" class="tac-only" title="Build an egg mortar: long-range splash (5)">🥚 Mortar<small>55 corn</small></button>
-    <button id="btnBuy_scarecrow" class="tac-only" title="Build a scarecrow: slows hens around it (6)">🧑‍🌾 Scarecrow<small>25 corn</small></button>
+  <!-- command panel: who is selected, what they can do, what you can buy -->
+  <div id="cmdPanel">
+    <div id="unitCard">
+      <div id="selInfo">No birds selected</div>
+      <div id="portraits"></div>
+    </div>
+    <div id="rtsBar" class="cmdgrid">
+      <button id="btnAll" title="Select all army (Q)"><i>👥</i><span>All</span><kbd>Q</kbd></button>
+      <button id="btnHold" class="tac-only" title="Stay put and shoot what comes into range (H)"><i>✋</i><span>Hold</span><kbd>H</kbd></button>
+      <button id="btnBomb" class="tac-only" title="Ducks lob an egg bomb at a spot (B)"><i>🥚</i><span>Egg bomb</span><kbd>B</kbd></button>
+      <button id="btnUpgrade" class="tac-only" title="Upgrade the selected birds and towers, up to ★3 (U)"><i>⬆</i><span>Upgrade</span><kbd>U</kbd></button>
+      <button id="btnHero" class="tac-only" title="Play this bird in first person during the round (F)"><i>★</i><span>Hero</span><kbd>F</kbd></button>
+      <button id="btnAMove" class="live-only" title="Attack-move: next click/tap (X)"><i>⚔</i><span>Attack</span><kbd>X</kbd></button>
+      <button id="btnPossess" class="accent" title="Become a selected duck (F)"><i>🎯</i><span>Drop in</span><kbd>F</kbd></button>
+      <button id="btnGo" class="tac-only go" title="Start the round (Space / Enter)"><i>▶</i><span>Go · 20s</span><kbd>␣</kbd></button>
+    </div>
+    <div id="powers" class="tray">
+      <button id="btnBuyTrooper" title="Buy a duck (1)"><i>🦆</i><span>Duck</span><small>20</small><kbd>1</kbd></button>
+      <button id="btnBuyHeavy" title="Buy a goose: tough, honk shield (2)"><i>🪿</i><span>Goose</span><small>35</small><kbd>2</kbd></button>
+      <button id="btnBuySniper" title="Buy a heron: long range, scope (3)"><i>🦩</i><span>Heron</span><small>30</small><kbd>3</kbd></button>
+      <button id="btnBuy_turret" class="tac-only" title="Build a corn turret: shoots hens in range (4)"><i>🌽</i><span>Turret</span><small>40</small><kbd>4</kbd></button>
+      <button id="btnBuy_mortar" class="tac-only" title="Build an egg mortar: long-range splash (5)"><i>💣</i><span>Mortar</span><small>55</small><kbd>5</kbd></button>
+      <button id="btnBuy_scarecrow" class="tac-only" title="Build a scarecrow: slows hens around it (6)"><i>🧑‍🌾</i><span>Scarecrow</span><small>25</small><kbd>6</kbd></button>
+    </div>
   </div>
 
   <!-- FPS controls -->

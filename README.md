@@ -54,7 +54,8 @@ Win: hold all 3 nests to crack the coop's eggshell, then destroy the coop. Lose:
 
 | | Desktop | Touch |
 |---|---|---|
-| Select | Left click, drag a box, Shift to add, **Q** all | Tap a bird, drag a box, **Select all** |
+| Select | Left click, drag a box, Shift to add, **Q** all, or click a portrait in the unit card | Tap a bird, drag a box, **All**, or tap a portrait |
+| Drag-to-move | Drag from a bird to a spot: a ghost preview shows where each bird lands and warns when hens can shoot there | Same, with one finger |
 | Move / attack | Right click ground / enemy, **X** then click for attack-move | Tap ground / enemy while birds are selected, **Attack-move** |
 | Buy birds | **1** duck, **2** goose, **3** heron | Buttons on the right |
 | Camera | WASD / arrows, middle-drag, wheel zoom, click minimap | Two-finger pan, pinch zoom, tap minimap |

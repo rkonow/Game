@@ -2227,6 +2227,7 @@ function pickEntity(sx, sy) {
 const pointers = new Map();
 let gesture = null;          // two-finger / middle-button pan
 let boxSel = null;           // {x0,y0,x1,y1}
+let orderDrag = null;        // {x,y} while dragging a move order out of a bird
 let lastTap = { ent: null, t: 0 };
 
 function markTouch(on) {
@@ -2248,6 +2249,10 @@ canvas.addEventListener('pointerdown', e => {
   try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   const p = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, button: e.button, type: e.pointerType };
   pointers.set(e.pointerId, p);
+  if (mode === 'rts' && (e.button === 0 || e.pointerType === 'touch') && pointers.size === 1) {
+    const ent = pickEntity(e.clientX, e.clientY);
+    if (ent && ent.team === PLAYER && !ent.isBase && !ent.isTower) p.unit = ent; // dragging from a bird gives it a move order
+  }
   if (mode === 'rts') {
     if (e.pointerType === 'touch' && pointers.size === 2) {
       boxSel = null;
@@ -2294,7 +2299,10 @@ canvas.addEventListener('pointermove', e => {
     return;
   }
   if ((p.button === 0 || p.type === 'touch') && Math.hypot(p.x - p.sx, p.y - p.sy) > 10) {
-    boxSel = { x0: p.sx, y0: p.sy, x1: p.x, y1: p.y };
+    if (p.unit && !p.unit.dead) {
+      if (!orderDrag) { if (!selection.includes(p.unit)) { selection = [p.unit]; updateButtons(); } }
+      orderDrag = { x: p.x, y: p.y };
+    } else boxSel = { x0: p.sx, y0: p.sy, x1: p.x, y1: p.y };
   }
 });
 
@@ -2305,6 +2313,8 @@ function endPointer(e) {
   if (!p || mode !== 'rts') return;
   if (gesture) { if (pointers.size === 0) gesture = null; return; }
   if (e.type === 'pointercancel') { boxSel = null; return; }
+  if (orderDrag) { orderDrag = null; dragOrder(p.x, p.y); return; }
+  if (e.type === 'pointercancel') orderDrag = null;
   if (boxSel) { finishBox(e.shiftKey); boxSel = null; return; }
   handleTap(p.x, p.y, { secondary: p.button === 2, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, touch: p.type === 'touch' });
 }
@@ -2523,9 +2533,51 @@ function updateButtons() {
   const counts = {};
   for (const u of sel) counts[u.type] = (counts[u.type] || 0) + 1;
   $('selInfo').textContent = sel.length ? `${sel.length} selected · ${Object.entries(counts).map(([t, n]) => `${n} ${NAMES[PLAYER][t].toLowerCase()}`).join(', ')}` : 'No birds selected';
+  renderPortraits(sel);
   $('btnAMove').classList.toggle('armed', amoveArmed);
 }
 
+// unit card: one portrait per selected bird with health, level and hero star. Tap one to pick just that bird.
+const ICONS = { trooper: '🦆', heavy: '🪿', sniper: '🦩', turret: '🌽', mortar: '💣', scarecrow: '🧑‍🌾' };
+let portraitUnits = [];
+function renderPortraits(sel) {
+  const box = $('portraits'); if (!box) return;
+  portraitUnits = sel.slice(0, 24);
+  box.innerHTML = portraitUnits.map((u, i) => `<button class="pt${u === tac.hero ? ' hero' : ''}" data-i="${i}" title="${nameOf(u)}"><i>${ICONS[u.type] || '🐤'}</i>${(u.lvl || 1) > 1 ? `<b>${'★'.repeat(u.lvl - 1)}</b>` : ''}<em><s style="width:${Math.round(Math.max(0, u.hp / u.maxHp) * 100)}%"></s></em></button>`).join('')
+    + (sel.length > 24 ? `<span class="more">+${sel.length - 24}</span>` : '');
+  document.body.classList.toggle('hasSel', sel.length > 0);
+}
+function refreshPortraitHp() {
+  const box = $('portraits'); if (!box) return;
+  box.querySelectorAll('.pt').forEach(el => {
+    const u = portraitUnits[+el.dataset.i]; if (!u) return;
+    const bar = el.querySelector('s'), k = Math.max(0, u.hp / u.maxHp);
+    bar.style.width = `${Math.round(k * 100)}%`; bar.className = k < 0.35 ? 'low' : '';
+    el.classList.toggle('dead', u.dead);
+  });
+}
+$('portraits').addEventListener('pointerdown', e => {
+  const el = e.target.closest('.pt'); if (!el) return;
+  e.stopPropagation();
+  const u = portraitUnits[+el.dataset.i]; if (!u || u.dead) return;
+  const now = performance.now();
+  if (selection.length === 1 && selection[0] === u && now - (renderPortraits.lastT || 0) < 400) { rts.focus.set(u.x, 0, u.z); }
+  renderPortraits.lastT = now;
+  selection = [u]; rts.focus.set(u.x, 0, u.z); updateButtons();
+});
+
+// top bar: corn, nests, timers and both bases as chips (refreshed a few times a second)
+let topbarT = 0;
+function renderTopbar(dt) {
+  topbarT -= dt; if (topbarT > 0) return; topbarT = 0.25;
+  const pb = Math.max(0, playerBase.hp / playerBase.maxHp), eb = Math.max(0, enemyBase.hp / enemyBase.maxHp);
+  const nest = p => `<span class="nest ${p.owner === PLAYER ? 'mine' : p.owner === ENEMY ? 'theirs' : ''}${p.contested ? ' fight' : ''}">${p.name}</span>`;
+  const bar = (label, k, cls, extra = '') => `<span class="base ${cls}"><b>${label}</b><em><s style="width:${Math.round(k * 100)}%"></s></em>${extra}</span>`;
+  const timer = tac.on ? `<span class="chip">🐔 ${countUnits(ENEMY)} vs 🦆 ${countUnits(PLAYER)}</span>` : `<span class="chip">🐔 wave in ${Math.ceil(waveTimer)}s</span>`;
+  $('status').innerHTML = `<span class="nests">${points.map(nest).join('')}</span>${bar('Barn', pb, 'ours')}${bar('Coop', eb, 'enemy', enemyBase.shield ? '<i title="Shielded: hold all 3 nests">🛡</i>' : '<i title="Cracked!">💥</i>')}${timer}`;
+}
+
+const setLabel = (id, text) => { const b = $(id), sp = b && b.querySelector('span'); if (sp) sp.textContent = text; else if (b) b.textContent = text; };
 let toastTimer = 0;
 function toast(msg, secs = 2) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show'); toastTimer = secs;
@@ -2758,10 +2810,76 @@ function updateTacticsHud() {
   if (tac.phase === 'plan') { tag.innerHTML = `<b>PLAN</b> round ${tac.round} · battle frozen`; tag.className = 'plan'; }
   else { tag.innerHTML = `<b>LIVE</b> ${Math.max(0, Math.ceil(tac.t))}s left${mode === 'fps' ? ' · you are the ★ hero' : ''}`; tag.className = 'op'; }
   const sel = liveSelection().filter(u => (u.lvl || 1) < 3);
-  $('btnUpgrade').textContent = sel.length ? `⬆ Upgrade (${sel.reduce((t, u) => t + upgradeCost(u), 0)})` : '⬆ Upgrade';
+  setLabel('btnUpgrade', sel.length ? `Upgrade · ${sel.reduce((t, u) => t + upgradeCost(u), 0)}` : 'Upgrade');
   for (const ty of TOWERS) $('btnBuy_' + ty).classList.toggle('off', game.cp < COSTS[ty]);
-  $('btnPossess').textContent = tac.hero && !tac.hero.dead ? 'Hero view ▶' : 'Hero down';
+  setLabel('btnPossess', tac.hero && !tac.hero.dead ? 'Hero view' : 'Hero down');
   $('btnPossess').classList.toggle('off', !tac.hero || tac.hero.dead);
+}
+
+function dragOrder(sx, sy) {
+  const sel = liveSelection().filter(u => !u.isTower);
+  if (!sel.length) return;
+  if (tac.on && tac.phase !== 'plan') { toast('Orders are locked until the round ends', 1); return; }
+  const ent = pickEntity(sx, sy), gp = groundPoint(sx, sy);
+  if (ent && ent.team === ENEMY) commandAttack(sel, ent);
+  else if (gp) commandMove(sel, gp.x, gp.z, tac.on ? 'amove' : 'move');
+}
+// how many hens could shoot at this spot right now
+function threatAt(x, z) {
+  let n = 0;
+  for (const e of entities) if (!e.dead && !e.isBase && e.team === ENEMY && Math.hypot(e.x - x, e.z - z) <= e.range + 0.5) n++;
+  return n;
+}
+function groundCircle(x, z, r, seg = 40) {
+  octx.beginPath();
+  let first = true;
+  for (let k = 0; k <= seg; k++) {
+    const a = k / seg * Math.PI * 2, q = toScreen(x + Math.cos(a) * r, 0.05, z + Math.sin(a) * r);
+    if (q.behind) { first = true; continue; }
+    if (first) { octx.moveTo(q.x, q.y); first = false; } else octx.lineTo(q.x, q.y);
+  }
+}
+// range rings of the selection, hen threat zones while planning, and the ghost preview of a dragged order
+function drawOrderUI() {
+  if (mode !== 'rts') return;
+  const planning = tac.on && tac.phase === 'plan';
+  if (planning || orderDrag) { // where the hens can shoot
+    octx.fillStyle = orderDrag ? 'rgba(255,70,50,.06)' : 'rgba(0,0,0,0)'; octx.strokeStyle = 'rgba(255,90,60,.3)'; octx.lineWidth = 1;
+    for (const e of entities) if (!e.dead && !e.isBase && e.team === ENEMY) { groundCircle(e.x, e.z, e.range, 32); octx.fill(); octx.stroke(); }
+  }
+  const sel = liveSelection();
+  octx.setLineDash([5, 6]); octx.lineWidth = 1.5; octx.strokeStyle = 'rgba(160,230,255,.55)';
+  for (const u of sel.slice(0, 12)) { groundCircle(u.x, u.z, u.range); octx.stroke(); }
+  octx.setLineDash([]);
+  if (!orderDrag) return;
+  const units = sel.filter(u => !u.isTower);
+  const ent = pickEntity(orderDrag.x, orderDrag.y), gp = groundPoint(orderDrag.x, orderDrag.y);
+  if (ent && ent.team === ENEMY) { // attack preview
+    const t = toScreen(ent.x, 0.1, ent.z);
+    octx.strokeStyle = '#ff6a5a'; octx.lineWidth = 2.5; groundCircle(ent.x, ent.z, 1.1, 24); octx.stroke();
+    for (const u of units) { const a = toScreen(u.x, 0.1, u.z); octx.setLineDash([4, 5]); octx.beginPath(); octx.moveTo(a.x, a.y); octx.lineTo(t.x, t.y); octx.stroke(); }
+    octx.setLineDash([]); label(t.x, t.y - 26, `Attack ${nameOf(ent)}`, '#ff8a7a');
+    return;
+  }
+  if (!gp) return;
+  const spots = formationSpots(units.length, gp.x, gp.z);
+  const sorted = [...units].sort((a, b) => Math.hypot(a.x - gp.x, a.z - gp.z) - Math.hypot(b.x - gp.x, b.z - gp.z));
+  let danger = 0;
+  sorted.forEach((u, i) => {
+    const [x, z] = spots[i], th = threatAt(x, z); danger = Math.max(danger, th);
+    const a = toScreen(u.x, 0.1, u.z), b = toScreen(x, 0.1, z);
+    octx.strokeStyle = th ? 'rgba(255,120,90,.9)' : 'rgba(157,255,196,.9)'; octx.lineWidth = 2;
+    octx.setLineDash([6, 6]); octx.beginPath(); octx.moveTo(a.x, a.y); octx.lineTo(b.x, b.y); octx.stroke(); octx.setLineDash([]);
+    groundCircle(x, z, u.radius + 0.25, 20); octx.fillStyle = th ? 'rgba(255,90,60,.35)' : 'rgba(80,255,150,.3)'; octx.fill(); octx.stroke();
+  });
+  const c = toScreen(gp.x, 0.1, gp.z);
+  label(c.x, c.y - 30, danger ? `⚠ ${danger} hen${danger > 1 ? 's' : ''} can shoot here` : `Move ${units.length} bird${units.length > 1 ? 's' : ''}`, danger ? '#ffb4a0' : '#b8ffd6');
+}
+function label(x, y, text, color) {
+  octx.font = '800 13px system-ui'; octx.textAlign = 'center';
+  const w = octx.measureText(text).width + 16;
+  octx.fillStyle = 'rgba(10,14,20,.8)'; octx.beginPath(); octx.roundRect ? octx.roundRect(x - w / 2, y - 14, w, 22, 11) : octx.rect(x - w / 2, y - 14, w, 22); octx.fill();
+  octx.fillStyle = color; octx.fillText(text, x, y + 2);
 }
 
 // planned paths, egg bomb targets and the hero star, drawn on top of the map
@@ -2786,7 +2904,8 @@ function drawPlans() {
       for (const p of u.path) { const q = proj(p.x, p.z); octx.lineTo(q.x, q.y); }
       octx.stroke(); octx.setLineDash([]);
       const end = proj(u.path[u.path.length - 1].x, u.path[u.path.length - 1].z);
-      octx.fillStyle = '#9dffc4'; octx.beginPath(); octx.arc(end.x, end.y, 4, 0, Math.PI * 2); octx.fill();
+      const last = u.path[u.path.length - 1]; void end;
+      groundCircle(last.x, last.z, u.radius + 0.2, 18); octx.fillStyle = threatAt(last.x, last.z) ? 'rgba(255,90,60,.4)' : 'rgba(157,255,196,.35)'; octx.fill(); octx.strokeStyle = '#9dffc4'; octx.stroke();
     } else if (o.type === 'attack' && !o.target.dead && tac.phase === 'plan') {
       const b = proj(o.target.x, o.target.z);
       octx.strokeStyle = '#ff6a5a'; octx.setLineDash([3, 4]);
@@ -2863,6 +2982,7 @@ function drawOverlay() {
     if (e.stunT > 0) { octx.font = '14px system-ui'; octx.fillText('💫', s.x, s.y - 6); }
     if (e.lvl > 1) { octx.font = '700 10px system-ui'; octx.fillStyle = '#ffd84a'; octx.fillText('★'.repeat(e.lvl - 1), s.x, s.y - 3); }
   }
+  drawOrderUI();
   if (tac.on) drawPlans();
   if (hawk.t > 0 && mode === 'fps') { // hens marked through walls
     for (const e of entities) {
@@ -2940,15 +3060,12 @@ function drawMinimap() {
 
 function updateHud(dt) {
   if (tac.on) { updateTacticsHud(); if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) $('toast').classList.remove('show'); } }
-  const pb = Math.max(0, Math.round(playerBase.hp / playerBase.maxHp * 100));
-  const eb = Math.max(0, Math.round(enemyBase.hp / enemyBase.maxHp * 100));
-  const dots = points.map(p => `${p.name}${p.owner === PLAYER ? '🦆' : p.owner === ENEMY ? '🐔' : '🥚'}`).join(' ');
-  if (tac.on) $('status').textContent = `Nests ${dots} · Barn ${pb}% · Coop ${eb}%${enemyBase.shield ? ' (shelled)' : ' (CRACKED!)'} · Ducks ${countUnits(PLAYER)} vs Hens ${countUnits(ENEMY)}`;
-  else $('status').textContent = `Nests ${dots} · Barn ${pb}% · Coop ${eb}%${enemyBase.shield ? ' (shelled)' : ' (CRACKED!)'} · Hens in ${Math.ceil(waveTimer)}s`;
+  renderTopbar(dt);
+  refreshPortraitHp();
   const income = CP_BASE + CP_PER_POINT * playerPointCount();
-  $('cpText').textContent = tac.on ? `🌽 ${Math.floor(game.cp)} corn` : `🌽 ${Math.floor(game.cp)}  (+${income.toFixed(1)}/s)`;
+  $('cpText').innerHTML = tac.on ? `🌽 <b>${Math.floor(game.cp)}</b>` : `🌽 <b>${Math.floor(game.cp)}</b> <small>+${income.toFixed(1)}/s</small>`;
   for (const [id, t] of [['btnBuyTrooper', 'trooper'], ['btnBuyHeavy', 'heavy'], ['btnBuySniper', 'sniper']]) $(id).classList.toggle('off', game.cp < COSTS[t]);
-  $('btnPossess').textContent = game.relink > 0 ? `Drop in (${Math.ceil(game.relink)}s)` : 'Drop in ▶';
+  setLabel('btnPossess', game.relink > 0 ? `Drop in ${Math.ceil(game.relink)}s` : 'Drop in');
   $('btnPossess').classList.toggle('off', game.relink > 0);
   if (possessed) {
     const k = Math.max(0, possessed.hp / possessed.maxHp);

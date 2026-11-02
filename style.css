@@ -235,3 +235,125 @@ body.tactics.plan .tac-only#btnBuy_turret, body.tactics.plan .tac-only#btnBuy_mo
 body.tactics.plan #powers button.tac-only { display: flex; }
 
 #btnGfx.gfx { margin-top: 12px; background: #fff3d0; color: #5a4630; border: 2px solid #d8b98a; border-radius: 12px; font-size: 13px; padding: 6px 14px; }
+
+/* ================= v4 interface: top bar, unit card, command grid, recruit tray ================= */
+:root {
+  --panel: rgba(16, 22, 30, .82); --panel-2: rgba(255, 255, 255, .06); --line: rgba(255, 255, 255, .14);
+  --ink: #eef3f8; --muted: #9fb0c3; --accent: #ffcc33; --good: #46e08a; --bad: #ff6a4a; --ours: #3fa9ff; --theirs: #ff5a3c;
+}
+#topbar {
+  position: absolute; top: calc(8px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left)); right: 170px;
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; pointer-events: none;
+}
+#topbar #status, #topbar #meters { position: static; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; right: auto; text-shadow: none; }
+#status > span, #meters > span {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 6px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: var(--ink);
+}
+#cpText { color: var(--accent) !important; font-size: 14px !important; }
+#cpText b { font-size: 15px; } #cpText small { color: var(--muted); font-weight: 600; }
+.nests { padding: 3px 5px !important; gap: 4px !important; }
+.nest { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 900;
+  background: #3a4553; color: #fff; border: 2px solid rgba(255,255,255,.35); }
+.nest.mine { background: var(--ours); } .nest.theirs { background: var(--theirs); }
+.nest.fight { animation: nestPulse .6s ease-in-out infinite; }
+@keyframes nestPulse { 50% { box-shadow: 0 0 0 4px rgba(255,204,51,.6); } }
+.base b { font-size: 11px; color: var(--muted); }
+.base em { width: 56px; height: 7px; border-radius: 4px; background: rgba(0,0,0,.5); overflow: hidden; display: block; }
+.base em s { display: block; height: 100%; text-decoration: none; }
+.base.ours em s { background: var(--ours); } .base.enemy em s { background: var(--theirs); }
+.base i { font-style: normal; }
+#modeTag { border-radius: 999px !important; }
+
+#cmdPanel {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(8px + env(safe-area-inset-bottom));
+  display: flex; gap: 8px; align-items: stretch; max-width: calc(100% - 16px); pointer-events: none;
+}
+body.fps #cmdPanel, body.menu #cmdPanel { display: none; }
+#cmdPanel > div { pointer-events: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 8px;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+#cmdPanel button { pointer-events: auto; }
+#unitCard { min-width: 180px; max-width: 300px; display: flex; flex-direction: column; gap: 6px; }
+#selInfo { background: none !important; padding: 0 2px !important; font-size: 12px; color: var(--muted); font-weight: 700; width: auto !important; text-align: left !important; }
+#portraits { display: flex; flex-wrap: wrap; gap: 4px; max-height: 96px; overflow-y: auto; }
+#portraits .pt { position: relative; width: 42px; height: 46px; min-height: 0; padding: 2px 0 0; border-radius: 10px; background: var(--panel-2);
+  border: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
+#portraits .pt i { font-style: normal; font-size: 22px; line-height: 28px; }
+#portraits .pt b { position: absolute; top: -3px; right: -2px; font-size: 9px; color: var(--accent); text-shadow: 0 1px 2px #000; }
+#portraits .pt.hero { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(255,204,51,.35) inset; }
+#portraits .pt em { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 5px; border-radius: 3px; background: rgba(0,0,0,.55); overflow: hidden; }
+#portraits .pt em s { display: block; height: 100%; background: var(--good); text-decoration: none; }
+#portraits .pt em s.low { background: var(--bad); }
+#portraits .pt.dead { opacity: .3; }
+#portraits .more { align-self: center; color: var(--muted); font-size: 12px; font-weight: 700; }
+
+#rtsBar.cmdgrid, #powers.tray {
+  position: static !important; transform: none !important; display: grid !important; grid-auto-flow: column; gap: 6px; align-items: stretch;
+  max-width: none; width: auto; flex-direction: row;
+}
+.cmdgrid button, .tray button {
+  position: relative; width: 66px; min-height: 62px; padding: 6px 4px 4px; border-radius: 12px; display: inline-flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 1px; background: var(--panel-2) !important; color: var(--ink) !important;
+  border: 1px solid var(--line) !important; box-shadow: none !important; font-size: 11px; font-weight: 700; line-height: 1.1;
+}
+.cmdgrid button i, .tray button i { font-style: normal; font-size: 22px; line-height: 26px; }
+.cmdgrid button span, .tray button span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 62px; }
+.cmdgrid button kbd, .tray button kbd { position: absolute; top: 3px; left: 5px; font: 700 9px system-ui; color: var(--muted); }
+body.touch .cmdgrid kbd, body.touch .tray kbd { display: none; }
+.tray button small { color: var(--accent) !important; font-size: 11px; font-weight: 800; }
+.tray button small::before { content: '🌽'; font-size: 9px; margin-right: 1px; }
+.cmdgrid button:hover, .tray button:hover { background: rgba(255,255,255,.12) !important; }
+.cmdgrid button.accent { background: linear-gradient(180deg, #3d8fe6, #2a6fc0) !important; border-color: #7ab8ff !important; }
+.cmdgrid button.go { background: linear-gradient(180deg, #3cc46a, #26994e) !important; border-color: #8ef0ae !important; width: 84px; }
+.cmdgrid button.armed, .tray button.armed { background: linear-gradient(180deg, #e0613f, #b8432a) !important; border-color: #ffa080 !important; }
+.tray button.off, .cmdgrid button.off { opacity: .4; }
+#rtsBar button.tac-only, #powers button.tac-only { display: none !important; }
+body.tactics.plan #rtsBar button.tac-only, body.tactics.plan #powers button.tac-only { display: inline-flex !important; }
+body.tactics #rtsBar button.live-only { display: none !important; }
+body.tactics.live #powers { display: none !important; }
+body.tactics.plan #btnPossess { display: none !important; }
+#btnAll, #btnHold, #btnUpgrade, #btnHero, #btnBomb, #btnAMove { }
+body:not(.hasSel) #btnHold, body:not(.hasSel) #btnUpgrade, body:not(.hasSel) #btnHero, body:not(.hasSel) #btnBomb, body:not(.hasSel) #btnAMove { opacity: .45; }
+
+@media (max-width: 760px) {
+  #topbar { right: 128px; }
+  #status > span, #meters > span { padding: 3px 8px; font-size: 11px; }
+  .base em { width: 38px; }
+  #cmdPanel { flex-direction: column; width: calc(100% - 12px); left: 6px; transform: none; gap: 5px; }
+  #cmdPanel > div { border-radius: 14px; padding: 6px; }
+  #unitCard { max-width: none; flex-direction: row; align-items: center; }
+  #selInfo { flex: 0 0 auto; max-width: 30%; }
+  #portraits { flex-wrap: nowrap; overflow-x: auto; max-height: none; }
+  #portraits .pt { flex: 0 0 auto; width: 36px; height: 40px; }
+  #portraits .pt i { font-size: 18px; line-height: 24px; }
+  #rtsBar.cmdgrid, #powers.tray { grid-auto-flow: column; grid-auto-columns: 1fr; overflow-x: auto; }
+  .cmdgrid button, .tray button { width: auto; min-width: 52px; min-height: 52px; font-size: 10px; }
+  .cmdgrid button i, .tray button i { font-size: 18px; line-height: 22px; }
+  .cmdgrid button.go { width: auto; }
+  #radio { top: calc(70px + env(safe-area-inset-top)) !important; }
+  #freeze span { top: calc(64px + env(safe-area-inset-top)) !important; }
+}
+/* v4 tweaks: compact two-row grids on wide screens, tighter phone top bar */
+@media (min-width: 761px) {
+  #rtsBar.cmdgrid, #powers.tray { grid-template-rows: repeat(2, auto); grid-auto-flow: column; }
+  .cmdgrid button, .tray button { width: 76px; min-height: 48px; padding: 4px; flex-direction: row; gap: 5px; justify-content: flex-start; padding-left: 8px; }
+  .cmdgrid button i, .tray button i { font-size: 18px; line-height: 20px; }
+  .cmdgrid button span, .tray button span { max-width: 46px; }
+  .tray button { width: 96px; flex-wrap: wrap; align-content: center; row-gap: 0; }
+  .tray button small { width: 100%; padding-left: 24px; text-align: left; margin-top: -2px; }
+  .cmdgrid button.go { width: 76px; grid-row: span 2; flex-direction: column; justify-content: center; padding-left: 4px; }
+  .cmdgrid button.go i { font-size: 24px; }
+  .cmdgrid button kbd, .tray button kbd { top: auto; bottom: 2px; left: auto; right: 5px; }
+}
+@media (max-width: 760px) {
+  .base b { display: none; }
+  #freeze span { display: none; }
+  #topbar { gap: 4px; }
+}
+@media (min-width: 761px) {
+  .cmdgrid button { width: 88px; } .cmdgrid button span { max-width: 58px; }
+}
+@media (max-width: 760px) {
+  #modeTag { max-width: 52vw; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: inline-block !important; }
+  #radio { top: calc(118px + env(safe-area-inset-top)) !important; }
+}
