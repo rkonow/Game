@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#10151c">
+<meta name="theme-color" content="#5c9e3c">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Vanguard Shift</title>
+<title>Fowl Play</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,8 +15,8 @@
 <div id="hud">
   <div id="status"></div>
   <div id="meters">
-    <div class="meter" title="Overdrive: fills while commanding, drains while possessing"><div id="odFill"></div><span id="odText">OVERDRIVE</span></div>
-    <span id="cpText" title="Command points for artillery, cover and reinforcements">CP 0</span>
+    <span id="modeTag"></span>
+    <span id="cpText" title="Corn: earned over time, faster for each nest you hold">🌽 0</span>
   </div>
   <div id="radio"></div>
   <canvas id="minimap" width="150" height="150"></canvas>
@@ -27,12 +27,12 @@
     <span id="selInfo">No units selected</span>
     <button id="btnAll" title="Select all army (Q)">Select all</button>
     <button id="btnAMove" title="Attack-move: next click/tap (X)">Attack-move</button>
-    <button id="btnPossess" class="accent" title="Take control of a selected unit (F)">Possess ▶</button>
+    <button id="btnPossess" class="accent" title="Become a selected duck (F)">Drop in ▶</button>
   </div>
   <div id="powers" class="bar">
-    <button id="btnArty" data-cost="40" title="Artillery strike on a visible area (1)">Artillery<small>40 CP</small></button>
-    <button id="btnCover" data-cost="15" title="Drop a cover wall (2)">Cover<small>15 CP</small></button>
-    <button id="btnReinf" data-cost="50" title="Instant squad at your post (3)">Reinforce<small>50 CP</small></button>
+    <button id="btnBuyTrooper" title="Buy a duck (1)">🦆 Duck<small>20 corn</small></button>
+    <button id="btnBuyHeavy" title="Buy a goose: tough, honk shield (2)">🪿 Goose<small>35 corn</small></button>
+    <button id="btnBuySniper" title="Buy a heron: long range, scope (3)">🎯 Heron<small>30 corn</small></button>
   </div>
 
   <!-- FPS controls -->
@@ -42,15 +42,12 @@
     <div id="vignette"></div>
     <div id="fpsTop" class="bar">
       <button id="btnExit" title="Back to command view (F / Tab)">◀ Command</button>
-      <button id="btnSwap" title="Jump to next friendly unit (E)">Swap unit</button>
-      <button id="btnRally" title="Order your squad to attack where you aim (R)">Rally squad</button>
+      <button id="btnSwap" title="Jump into the next bird (E)">Swap bird</button>
+      <button id="btnRally" title="Send nearby birds where you aim (R)">Rally flock</button>
     </div>
     <div id="fpsHp"><div id="fpsHpFill"></div><span id="fpsHpText"></span></div>
-    <div id="plantBar"><div id="plantFill"></div><span>Planting charge…</span></div>
-    <button id="btnPlant" title="Plant a charge on the enemy post's shield (G)">Plant charge (G)</button>
     <div id="fpsActions" class="bar">
       <button id="btnAbility" title="Role ability (Q)">Ability</button>
-      <button id="btnMark" title="Mark the target under your crosshair for the whole army (T)">Mark</button>
     </div>
     <div id="lockHint">Click to aim · Esc frees the mouse</div>
     <div id="stick" class="touch-only"><div id="knob"></div></div>
@@ -60,35 +57,31 @@
 
 <div id="menu" class="screen">
   <div class="card">
-    <h1>Vanguard Shift</h1>
-    <p class="lead">Command from above, then drop into any soldier. The command view only sees what your units see, and the red post is shielded: only a soldier you control can plant a charge to drop it. Possessing burns <b>Overdrive</b> (x2 damage), which recharges while you command.</p>
+    <h1>🦆 Fowl Play 🥚</h1>
+    <p class="sub">Ducks vs. Hens: the Great Egg War</p>
+    <p class="lead">The hens hid behind a giant eggshell. Sit on the three nests <b>A B C</b> in the middle to crack it, then flatten their coop. <b>Only a duck you control in first person can claim a nest.</b></p>
     <div class="cols">
       <div>
-        <h3>Desktop</h3>
+        <h3>Commander (top view)</h3>
         <ul>
-          <li><b>Left click / drag</b> select units (Shift adds)</li>
-          <li><b>Right click</b> move, or attack an enemy</li>
-          <li><b>X</b> then click: attack-move · <b>Q</b> select all</li>
-          <li><b>WASD / arrows</b>, middle-drag pan · <b>wheel</b> zoom</li>
-          <li><b>F</b> or double-click a unit: possess</li>
-          <li><b>1 / 2 / 3</b> artillery, cover, reinforce (command points)</li>
-          <li>In FPS: <b>WASD</b> move, <b>mouse</b> aim, <b>click</b> fire, <b>Q</b> role ability, <b>T</b> mark target, <b>G</b> plant charge, <b>R</b> rally squad, <b>E</b> swap, <b>F</b>/<b>Tab</b> back</li>
+          <li>Move your flock to guard the nests</li>
+          <li>Spend 🌽 corn on birds: <b>Duck</b>, <b>Goose</b>, <b>Heron</b>. Every nest you hold pays more corn</li>
+          <li class="desk">Desktop: click / drag to select, <b>right click</b> to move or attack, <b>1 2 3</b> buy, <b>F</b> or double-click to drop in</li>
+          <li>Touch: tap / drag to select, tap ground to move, two fingers pan and zoom, double-tap to drop in</li>
         </ul>
       </div>
       <div>
-        <h3>Touch</h3>
+        <h3>Duck mode (first person)</h3>
         <ul>
-          <li><b>Tap</b> a unit to select · <b>drag</b> to box-select</li>
-          <li>With units selected, <b>tap</b> ground to move, an enemy to attack</li>
-          <li><b>Two fingers</b> pan and pinch-zoom</li>
-          <li><b>Double-tap</b> a unit or press <b>Possess</b></li>
-          <li>Power buttons on the right: artillery, cover, reinforce</li>
-          <li>In FPS: left <b>stick</b> moves, drag right side to aim, hold <b>FIRE</b>, plus <b>Ability</b> and <b>Mark</b></li>
+          <li>Sit on a nest to claim it · you deal <b>x2 damage</b></li>
+          <li class="desk">Desktop: <b>WASD</b> + mouse, click to fire, <b>Q</b> ability, <b>R</b> rally squad, <b>E</b> swap, <b>F</b>/<b>Tab</b> back</li>
+          <li>Touch: left stick, drag right side to aim, hold <b>FIRE</b></li>
+          <li>If your duck gets cooked, wait 5s to drop in again</li>
         </ul>
       </div>
     </div>
-    <p class="roles"><b>Roles</b> · Trooper: frag grenade · Heavy: armor up · Scout: dash, long sight · Sniper: scope, headshots · Medic: heals, revives fallen allies</p>
-    <button id="btnStart" class="accent big">Deploy</button>
+    <p class="roles">Duck: egg bomb · Goose: honk shield · Heron: scope and beak shots · Watch out for the <b>Big Rooster</b> · Alerts have a <b>Drop in</b> button that takes you straight there</p>
+    <button id="btnStart" class="accent big">Waddle in!</button>
   </div>
 </div>
 

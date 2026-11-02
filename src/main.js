@@ -1,28 +1,31 @@
-// Vanguard Shift: RTS command view + first-person possession prototype.
+// Fowl Play: ducks vs hens. RTS command view + first-person possession prototype.
+//
+// One loop: the three capture points can only be taken by a soldier you are
+// controlling in first person. Points pay command points, which you spend in
+// the command view on new soldiers. Hold all three and the enemy post's shield
+// drops so your army can destroy it.
 import * as THREE from '../vendor/three.module.min.js';
 
 // ---------------------------------------------------------------- config
 const HALF = 30;            // map spans [-HALF, HALF] on X and Z
-const N = HALF * 2;         // grid cells per side (1 unit each), used for pathing and fog
+const N = HALF * 2;         // pathfinding grid cells per side (1 unit each)
 const PLAYER = 0, ENEMY = 1;
 const TEAM_COLORS = [0x3fa9ff, 0xff5a3c];
 const TYPES = {
-  trooper: { hp: 60, speed: 4.2, range: 10, dmg: 7, rate: 0.45, radius: 0.45, acc: 0.7, sight: 11, ability: 'Frag', abilityCd: 6 },
-  heavy: { hp: 150, speed: 3.0, range: 8, dmg: 18, rate: 1.1, radius: 0.6, acc: 0.8, sight: 9, ability: 'Armor up', abilityCd: 12 },
-  scout: { hp: 45, speed: 6.2, range: 9, dmg: 5, rate: 0.3, radius: 0.4, acc: 0.6, sight: 16, ability: 'Dash', abilityCd: 3.5 },
-  sniper: { hp: 45, speed: 3.4, range: 16, dmg: 38, rate: 2.2, radius: 0.45, acc: 0.85, sight: 12, ability: 'Scope', abilityCd: 0 },
-  medic: { hp: 70, speed: 4.0, range: 7, dmg: 4, rate: 0.5, radius: 0.45, acc: 0.6, sight: 10, ability: 'Heal pulse', abilityCd: 8 },
-  elite: { hp: 450, speed: 4.4, range: 11, dmg: 12, rate: 0.25, radius: 0.75, acc: 0.8, sight: 14, ability: '', abilityCd: 0 },
+  trooper: { hp: 60, speed: 4.2, range: 10, dmg: 7, rate: 0.45, radius: 0.45, acc: 0.7, ability: 'Egg bomb', abilityCd: 6 },
+  heavy: { hp: 150, speed: 3.0, range: 8, dmg: 18, rate: 1.1, radius: 0.6, acc: 0.8, ability: 'Honk shield', abilityCd: 12 },
+  sniper: { hp: 45, speed: 3.4, range: 16, dmg: 38, rate: 2.2, radius: 0.45, acc: 0.85, ability: 'Scope', abilityCd: 0 },
+  elite: { hp: 450, speed: 4.4, range: 11, dmg: 12, rate: 0.25, radius: 0.75, acc: 0.8, ability: '', abilityCd: 0 },
 };
-const POSSESS_DMG = 2.0;    // damage multiplier while the player is driving the unit
+const COSTS = { trooper: 20, heavy: 35, sniper: 30 };
+const POSSESS_DMG = 2.0;    // damage multiplier while you drive the unit
 const POSSESS_RATE = 0.6;   // fire-rate multiplier (lower = faster)
 const EYE = 1.45;
-const PLAYER_CAP = 20, ENEMY_CAP = 24;
-const OD_FILL = 3.5, OD_DRAIN = 6, OD_MIN = 30, LINK_CD = 8;
-const CP_RATE = 1.2, CP_MAX = 150;
-const POWERS = { arty: 40, cover: 15, reinf: 50 };
-const SHIELD_DOWN_TIME = 25, PLANT_TIME = 2.5;
-const REINFORCE_CYCLE = ['trooper', 'scout', 'trooper', 'heavy', 'sniper', 'medic'];
+const PLAYER_CAP = 20, ENEMY_CAP = 22;
+const RELINK_CD = 5;        // wait after your soldier dies
+const CP_BASE = 1, CP_PER_POINT = 1.5, CP_MAX = 200, CP_START = 40;
+const POINT_DEFS = [['A', -17, 0], ['B', 0, 0], ['C', 17, 0]];
+const POINT_R = 3;
 
 // ---------------------------------------------------------------- renderer / scene
 const canvas = document.getElementById('game');
@@ -38,137 +41,255 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x10151c);
-scene.fog = new THREE.Fog(0x10151c, 45, 120);
+scene.background = new THREE.Color(0x9fd8ff);
+scene.fog = new THREE.Fog(0x9fd8ff, 60, 150);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 300);
 scene.add(camera);
 
-scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x30281f, 0.9));
-const sun = new THREE.DirectionalLight(0xffffff, 1.7);
+scene.add(new THREE.HemisphereLight(0xeaf6ff, 0x5a7a35, 1.25));
+const sun = new THREE.DirectionalLight(0xfff4dc, 1.9);
 sun.position.set(18, 40, 12);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 Object.assign(sun.shadow.camera, { left: -36, right: 36, top: 36, bottom: -36, near: 1, far: 100 });
 scene.add(sun);
 
-function makeGroundTexture() {
+// small canvas textures so everything stays procedural
+function canvasTex(w, h, draw, rx = 1, ry = 1) {
   const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d');
-  g.fillStyle = '#2b3542'; g.fillRect(0, 0, 128, 128);
-  g.fillStyle = '#303b49'; g.fillRect(4, 4, 56, 56); g.fillRect(68, 68, 56, 56);
-  g.strokeStyle = '#3d4a5b'; g.lineWidth = 2; g.strokeRect(1, 1, 126, 126);
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(N / 4, N / 4);
+  t.repeat.set(rx, ry);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
   return t;
 }
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(N, N), new THREE.MeshStandardMaterial({ map: makeGroundTexture(), roughness: 0.95 }));
+const grassTex = canvasTex(128, 128, (g, w, h) => {
+  g.fillStyle = '#6fbf4a'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#7ccb54'; g.fillRect(0, 0, 64, 64); g.fillRect(64, 64, 64, 64);
+  for (let i = 0; i < 260; i++) {
+    g.fillStyle = Math.random() < 0.5 ? '#5fae3d' : '#8bd862';
+    g.fillRect(Math.random() * w, Math.random() * h, 2, 3 + Math.random() * 3);
+  }
+}, N / 4, N / 4);
+const hayTex = canvasTex(64, 64, (g, w, h) => {
+  g.fillStyle = '#e8c35a'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 90; i++) {
+    g.strokeStyle = Math.random() < 0.5 ? '#c9a03c' : '#f6d878'; g.lineWidth = 1.5;
+    const x = Math.random() * w, y = Math.random() * h;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + 10 + Math.random() * 8, y + (Math.random() - 0.5) * 4); g.stroke();
+  }
+  g.fillStyle = '#a5532c'; g.fillRect(0, 18, w, 4); g.fillRect(0, 42, w, 4); // twine
+});
+const plankTex = canvasTex(64, 64, (g, w, h) => {
+  g.fillStyle = '#a8703f'; g.fillRect(0, 0, w, h);
+  for (let x = 0; x < w; x += 16) { g.fillStyle = x % 32 ? '#b47c49' : '#9c6637'; g.fillRect(x, 0, 15, h); g.fillStyle = '#6e4423'; g.fillRect(x + 15, 0, 1, h); }
+  g.fillStyle = '#5a3a1e'; g.fillRect(0, 12, w, 3); g.fillRect(0, 48, w, 3);
+});
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(N, N), new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
-const outer = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: 0x161c24 }));
+const outer = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: 0x5c9e3c }));
 outer.rotation.x = -Math.PI / 2; outer.position.y = -0.02;
 scene.add(outer);
 const noRay = o => { o.raycast = () => {}; return o; };
 
-// ---------------------------------------------------------------- obstacles
+// dirt lanes from barn to barn, and the duck pond
+for (const x of [-17, 0, 17]) {
+  const lane = noRay(new THREE.Mesh(new THREE.PlaneGeometry(4.5, 44), new THREE.MeshStandardMaterial({ color: 0xb48a5a, roughness: 1, transparent: true, opacity: 0.55 })));
+  lane.rotation.x = -Math.PI / 2; lane.position.set(x, 0.01, 0);
+  lane.receiveShadow = true;
+  scene.add(lane);
+}
+{
+  const pond = noRay(new THREE.Mesh(new THREE.CircleGeometry(4, 32), new THREE.MeshStandardMaterial({ color: 0x4aa8e0, roughness: 0.15, metalness: 0.1 })));
+  pond.rotation.x = -Math.PI / 2; pond.scale.set(1.5, 1, 1); pond.position.set(-21, 0.015, 26);
+  scene.add(pond);
+  const mud = noRay(new THREE.Mesh(new THREE.CircleGeometry(3.2, 24), new THREE.MeshStandardMaterial({ color: 0x8a5a3a, roughness: 1 })));
+  mud.rotation.x = -Math.PI / 2; mud.scale.set(1.6, 1, 1); mud.position.set(21, 0.015, -26);
+  scene.add(mud);
+}
+// scenery outside the play area: trees, sunflowers, a wooden border fence
+{
+  const trunkGeo = new THREE.CylinderGeometry(0.3, 0.4, 2, 6), crownGeo = new THREE.IcosahedronGeometry(1.8, 0);
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7a4f2a }), crownMat = new THREE.MeshStandardMaterial({ color: 0x3f9a3a, flatShading: true });
+  const stemGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.6, 4), headGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 10);
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0x3a8a2a }), petalMat = new THREE.MeshStandardMaterial({ color: 0xffcc1a, emissive: 0x332200 });
+  for (let i = 0; i < 70; i++) {
+    const a = Math.random() * Math.PI * 2, r = 34 + Math.random() * 30;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (Math.max(Math.abs(x), Math.abs(z)) < 32) continue;
+    const s = 0.8 + Math.random() * 0.8;
+    const t = noRay(new THREE.Mesh(trunkGeo, trunkMat)); t.position.set(x, 1 * s, z); t.scale.setScalar(s);
+    const c = noRay(new THREE.Mesh(crownGeo, crownMat)); c.position.set(x, 2.8 * s, z); c.scale.setScalar(s); c.castShadow = true;
+    scene.add(t, c);
+  }
+  for (let i = 0; i < 46; i++) {
+    const side = i % 2 ? 1 : -1, x = side * (31 + Math.random() * 2), z = -28 + (i / 46) * 56;
+    const st = noRay(new THREE.Mesh(stemGeo, stemMat)); st.position.set(x, 0.8, z);
+    const hd = noRay(new THREE.Mesh(headGeo, petalMat)); hd.position.set(x, 1.65, z); hd.rotation.x = Math.PI / 2 - 0.3; hd.rotation.z = side * 0.4;
+    scene.add(st, hd);
+  }
+  const railMat = new THREE.MeshStandardMaterial({ map: plankTex, roughness: 0.9 });
+  for (const [x, z, w, d] of [[0, -30.3, 61, 0.15], [0, 30.3, 61, 0.15], [-30.3, 0, 0.15, 61], [30.3, 0, 0.15, 61]]) {
+    for (const y of [0.4, 0.85]) { const r = noRay(new THREE.Mesh(new THREE.BoxGeometry(w, 0.14, d), railMat)); r.position.set(x, y, z); scene.add(r); }
+  }
+}
+
+// ---------------------------------------------------------------- obstacles: hay bales and fences
 // [x, z, width, depth, height]; layout is mirrored so both sides are fair.
 const OBSTACLE_DEFS = [
-  [-10, 0, 7, 1.2, 2], [10, 0, 7, 1.2, 2],
+  [-10, 0, 5, 1.2, 2], [10, 0, 5, 1.2, 2],
   [0, -7, 1.2, 4, 1.8], [0, 7, 1.2, 4, 1.8],
   [-18, -10, 3, 3, 2.6], [18, 10, 3, 3, 2.6], [-18, 10, 3, 3, 2.6], [18, -10, 3, 3, 2.6],
   [-6, -14, 4, 1, 1.7], [6, 14, 4, 1, 1.7], [6, -14, 4, 1, 1.7], [-6, 14, 4, 1, 1.7],
-  [-24, 0, 1.2, 9, 2.2], [24, 0, 1.2, 9, 2.2],
+  [-25, 0, 1.2, 9, 2.2], [25, 0, 1.2, 9, 2.2],
   [-13, -20, 1, 4, 1.8], [13, 20, 1, 4, 1.8], [13, -20, 1, 4, 1.8], [-13, 20, 1, 4, 1.8],
 ];
 const boxes = []; // {minX,maxX,minZ,maxZ, owner?}
 const staticShootables = [ground];
-const obstacleMat = new THREE.MeshStandardMaterial({ color: 0x5a6676, roughness: 0.8 });
-const obstacleTopMat = new THREE.MeshStandardMaterial({ color: 0x77879a, roughness: 0.7 });
-const coverMat = new THREE.MeshStandardMaterial({ color: 0x3d6b8f, roughness: 0.6 });
-function addObstacle(x, z, w, d, h, mat) {
-  const mats = mat ? mat : [obstacleMat, obstacleMat, obstacleTopMat, obstacleMat, obstacleMat, obstacleMat];
+const hayMat = new THREE.MeshStandardMaterial({ map: hayTex, roughness: 1 });
+const hayTopMat = new THREE.MeshStandardMaterial({ color: 0xf0d070, roughness: 1 });
+const plankMat = new THREE.MeshStandardMaterial({ map: plankTex, roughness: 0.9 });
+const barnRedMat = new THREE.MeshStandardMaterial({ color: 0xc8402c, roughness: 0.8 });
+for (const [x, z, w, d, h] of OBSTACLE_DEFS) {
+  const fence = Math.min(w, d) <= 1;          // thin ones are wooden fences
+  const shed = w === 3 && d === 3;            // square ones are little red sheds
+  const mats = fence ? plankMat : shed ? [barnRedMat, barnRedMat, hayTopMat, barnRedMat, barnRedMat, barnRedMat] : [hayMat, hayMat, hayTopMat, hayMat, hayMat, hayMat];
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats);
   m.position.set(x, h / 2, z);
   m.castShadow = m.receiveShadow = true;
   scene.add(m);
   staticShootables.push(m);
+  if (shed) { // pointy roof and a white door (decor only)
+    const roof = noRay(new THREE.Mesh(new THREE.ConeGeometry(2.5, 1.4, 4), new THREE.MeshStandardMaterial({ color: 0x6b3a2a, flatShading: true })));
+    roof.position.set(x, h + 0.7, z); roof.rotation.y = Math.PI / 4; roof.castShadow = true;
+    const door = noRay(new THREE.Mesh(new THREE.PlaneGeometry(1, 1.6), new THREE.MeshStandardMaterial({ color: 0xffffff })));
+    door.position.set(x, 0.8, z + (z > 0 ? -1.51 : 1.51)); if (z > 0) door.rotation.y = Math.PI;
+    scene.add(roof, door);
+  } else if (!fence) { // a smaller bale stacked on top
+    const top = noRay(new THREE.Mesh(new THREE.BoxGeometry(w * 0.55, 0.6, d * 0.9), [hayMat, hayMat, hayTopMat, hayMat, hayMat, hayMat]));
+    top.position.set(x + w * 0.12, h + 0.3, z); top.castShadow = true;
+    scene.add(top);
+  }
   boxes.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
-  return m;
 }
-for (const [x, z, w, d, h] of OBSTACLE_DEFS) addObstacle(x, z, w, d, h);
 
-// ---------------------------------------------------------------- entities
+// ---------------------------------------------------------------- capture points: nests with a giant egg
+const NEUTRAL_COLOR = 0xfff6e0;
+const points = POINT_DEFS.map(([name, x, z]) => {
+  const g = new THREE.Group();
+  const disc = noRay(new THREE.Mesh(new THREE.CircleGeometry(POINT_R, 40), new THREE.MeshBasicMaterial({ color: NEUTRAL_COLOR, transparent: true, opacity: 0.18, depthWrite: false })));
+  disc.rotation.x = -Math.PI / 2; disc.position.y = 0.03;
+  const rim = noRay(new THREE.Mesh(new THREE.RingGeometry(POINT_R - 0.15, POINT_R, 48), new THREE.MeshBasicMaterial({ color: NEUTRAL_COLOR, transparent: true, opacity: 0.8, depthWrite: false })));
+  rim.rotation.x = -Math.PI / 2; rim.position.y = 0.04;
+  const arc = noRay(new THREE.Mesh(new THREE.RingGeometry(POINT_R + 0.1, POINT_R + 0.45, 48, 1, 0, 0.001), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false, side: THREE.DoubleSide })));
+  arc.rotation.x = -Math.PI / 2; arc.position.y = 0.05;
+  const nest = noRay(new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.35, 8, 20), new THREE.MeshStandardMaterial({ map: hayTex, roughness: 1 })));
+  nest.rotation.x = -Math.PI / 2; nest.position.y = 0.25; nest.castShadow = true;
+  const eggMat = new THREE.MeshStandardMaterial({ color: NEUTRAL_COLOR, roughness: 0.35, emissive: 0x111111 });
+  const flag = noRay(new THREE.Mesh(new THREE.SphereGeometry(0.75, 20, 14), eggMat)); // the egg
+  flag.scale.set(1, 1.35, 1); flag.position.y = 1.0; flag.castShadow = true;
+  g.add(disc, rim, arc, nest, flag);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  return { name, x, z, owner: null, prog: 0, disc, rim, arc, flag, lastArc: -2 };
+});
+const pointColor = p => (p.owner === PLAYER ? TEAM_COLORS[PLAYER] : p.owner === ENEMY ? TEAM_COLORS[ENEMY] : NEUTRAL_COLOR);
+const playerPointCount = () => points.filter(p => p.owner === PLAYER).length;
+
+// ---------------------------------------------------------------- entities: ducks vs hens
 let entities = [];
 const teamMats = TEAM_COLORS.map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.55 }));
-const darkMat = new THREE.MeshStandardMaterial({ color: 0x1c2229, roughness: 0.5, metalness: 0.4 });
-const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf2f5f8, roughness: 0.5 });
+const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a3a24, roughness: 0.5, metalness: 0.3 });
 const goldMat = new THREE.MeshStandardMaterial({ color: 0xffc340, emissive: 0x7a4a00, roughness: 0.35, metalness: 0.5 });
-const visorMat = new THREE.MeshStandardMaterial({ color: 0xdff6ff, emissive: 0x88ccff, emissiveIntensity: 0.6 });
+const visorMat = new THREE.MeshStandardMaterial({ color: 0xfff07a, emissive: 0xffd000, emissiveIntensity: 0.5 });
+const orangeMat = new THREE.MeshStandardMaterial({ color: 0xff8a1f, roughness: 0.5 });
+const beakMat = new THREE.MeshStandardMaterial({ color: 0xffb21f, roughness: 0.5 });
+const combMat = new THREE.MeshStandardMaterial({ color: 0xe0242a, roughness: 0.6 });
+const eyeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 });
+const bucketMat = new THREE.MeshStandardMaterial({ color: 0x9aa4ae, roughness: 0.35, metalness: 0.7 });
+const strawMat = new THREE.MeshStandardMaterial({ color: 0xe6c66a, roughness: 1 });
+const BODY_COLORS = [0xffd84a, 0xf6f2ea];      // ducks are yellow, hens are white
+const NAMES = [
+  { trooper: 'Duck', heavy: 'Goose', sniper: 'Heron' },
+  { trooper: 'Hen', heavy: 'Turkey', sniper: 'Pigeon', elite: 'Big Rooster' },
+];
+const nameOf = u => NAMES[u.team][u.type];
+const sphere = new THREE.SphereGeometry(1, 14, 10);
 
 function tagMeshes(group, ent) {
   group.traverse(o => { o.userData.entity = ent; if (o.isMesh) o.castShadow = true; });
+}
+function blob(mat, sx, sy, sz, x, y, z) {
+  const m = new THREE.Mesh(sphere, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); return m;
 }
 
 function makeUnit(team, type, x, z) {
   const t = TYPES[type];
   const u = {
     kind: 'unit', type, team, x, z, hp: t.hp, maxHp: t.hp, speed: t.speed, range: t.range,
-    dmg: t.dmg, rate: t.rate, radius: t.radius, acc: t.acc, sight: t.sight,
+    dmg: t.dmg, rate: t.rate, radius: t.radius, acc: t.acc,
     facing: team === PLAYER ? 0 : Math.PI, cool: Math.random() * t.rate, abilityCd: 0, armorT: 0,
-    order: { type: 'idle' }, path: null, pathGoal: null, possessed: false, dead: false, flash: 0, spotted: 0,
-    elite: type === 'elite', healTick: 0,
+    order: { type: 'idle' }, path: null, pathGoal: null, possessed: false, dead: false, flash: 0,
+    elite: type === 'elite',
   };
   const g = new THREE.Group();
-  const bodyMat = (type === 'elite' ? goldMat : teamMats[team]).clone();
+  const bodyMat = type === 'elite' ? goldMat.clone() : new THREE.MeshStandardMaterial({ color: type === 'heavy' && team === PLAYER ? 0xf2f2f2 : type === 'sniper' && team === PLAYER ? 0x9fb8d0 : type === 'heavy' ? 0x8a5a3a : type === 'sniper' ? 0x8e95a8 : BODY_COLORS[team], roughness: 0.7 });
   u.bodyMat = bodyMat;
   const r = t.radius;
-  let body;
-  if (type === 'heavy' || type === 'elite') {
-    body = new THREE.Mesh(new THREE.BoxGeometry(r * 1.8, 1.1, r * 1.5), bodyMat);
-    body.position.y = 0.75;
-    const pack = new THREE.Mesh(new THREE.BoxGeometry(r * 1.2, 0.7, 0.35), darkMat);
-    pack.position.set(0, 0.95, r * 0.85);
-    g.add(pack);
-  } else if (type === 'scout') {
-    body = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r * 0.85, 0.95, 10), bodyMat);
-    body.position.y = 0.7;
-    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.7, 4), darkMat);
-    antenna.position.set(-0.15, 1.8, 0.1);
-    g.add(antenna);
-  } else {
-    body = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.8, r, 1.0, 10), bodyMat);
-    body.position.y = 0.7;
+  const tall = type === 'heavy' || type === 'sniper';   // geese, herons, turkeys, pigeons stretch their necks
+  // body, tail, wings, feet
+  g.add(blob(bodyMat, r * 1.15, 0.5, r * 1.45, 0, 0.62, 0));
+  const tail = blob(bodyMat, r * 0.5, 0.22, 0.35, 0, 0.82, r * 1.25); tail.rotation.x = -0.6; g.add(tail);
+  if (team === ENEMY && type === 'heavy') { // turkey fan
+    for (let k = -2; k <= 2; k++) { const f = blob(k % 2 ? combMat : bodyMat, 0.18, 0.55, 0.05, k * 0.22, 1.2, r * 1.3); f.rotation.z = -k * 0.3; g.add(f); }
   }
-  if (type === 'medic') {
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.92, r * 0.92, 0.18, 12), whiteMat);
-    band.position.y = 0.95;
-    const crossA = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.06), new THREE.MeshBasicMaterial({ color: 0xff3344 }));
-    const crossB = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.34, 0.06), crossA.material);
-    crossA.position.set(0, 0.75, r * 0.9); crossB.position.copy(crossA.position);
-    g.add(band, crossA, crossB);
+  g.add(blob(bodyMat, 0.12, 0.32, r * 0.9, -r * 1.05, 0.68, 0.05), blob(bodyMat, 0.12, 0.32, r * 0.9, r * 1.05, 0.68, 0.05));
+  for (const s of [-1, 1]) { const f = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.3), orangeMat); f.position.set(s * 0.18, 0.03, -0.08); g.add(f); }
+  // neck + head
+  const headY = tall ? 1.5 : 1.3, headZ = -r * 0.75;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.18, headY - 0.75, 8), bodyMat);
+  neck.position.set(0, (headY + 0.75) / 2, headZ * 0.85); g.add(neck);
+  g.add(blob(bodyMat, 0.27, 0.26, 0.28, 0, headY, headZ));
+  for (const s of [-1, 1]) g.add(blob(eyeMat, 0.05, 0.06, 0.05, s * 0.17, headY + 0.07, headZ - 0.18));
+  if (team === PLAYER) { // flat duck bill
+    const bill = blob(type === 'sniper' ? beakMat : orangeMat, 0.15, 0.06, type === 'sniper' ? 0.42 : 0.24, 0, headY - 0.04, headZ - 0.32); g.add(bill);
+  } else { // pointy beak, comb and wattle
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.22, 6), beakMat); beak.rotation.x = -Math.PI / 2; beak.position.set(0, headY - 0.02, headZ - 0.33); g.add(beak);
+    for (let k = -1; k <= 1; k++) g.add(blob(combMat, 0.06, type === 'elite' ? 0.2 : 0.12, 0.07, 0, headY + 0.27 + (k ? 0 : 0.04), headZ + k * 0.1));
+    g.add(blob(combMat, 0.05, 0.09, 0.05, 0, headY - 0.18, headZ - 0.22));
   }
-  g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 8), bodyMat);
-  head.position.y = 1.45;
-  g.add(head);
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.09, 0.12), visorMat);
-  visor.position.set(0, 1.48, -0.19);
-  g.add(visor);
-  const gunLen = { heavy: 0.9, elite: 1.0, sniper: 1.4, scout: 0.55, medic: 0.5 }[type] || 0.7;
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(type === 'heavy' || type === 'elite' ? 0.16 : 0.09, 0.11, gunLen), darkMat);
-  gun.position.set(r * 0.75, 1.0, -gunLen / 2);
-  g.add(gun);
-  u.muzzleOffset = { side: r * 0.75, fwd: gunLen, y: 1.0 };
+  // team bandana so sides read at a glance from above
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.06, 6, 14), teamMats[team]);
+  band.rotation.x = Math.PI / 2; band.position.set(0, 0.95, headZ * 0.8); g.add(band);
+  // hats
+  if (type === 'heavy') {
+    const bucket = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.3, 0.3, 12), bucketMat); bucket.position.set(0, headY + 0.27, headZ + 0.02); g.add(bucket);
+  } else if (type === 'sniper') {
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.04, 16), strawMat); brim.position.set(0, headY + 0.23, headZ);
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.2, 12), strawMat); crown.position.set(0, headY + 0.34, headZ);
+    g.add(brim, crown);
+  } else if (type === 'elite') {
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.2, 5, 1, true), goldMat); crown.position.set(0, headY + 0.5, headZ); g.add(crown);
+  }
+  // corn blaster: green tube with a yellow hopper
+  const gunLen = { heavy: 0.9, elite: 1.0, sniper: 1.4 }[type] || 0.7;
+  const gun = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, gunLen, 8), darkMat);
+  gun.rotation.x = Math.PI / 2; gun.position.set(r * 0.85, 0.95, -gunLen / 2);
+  const hopper = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.16), visorMat); hopper.position.set(r * 0.85, 1.07, -0.1);
+  g.add(gun, hopper);
+  u.muzzleOffset = { side: r * 0.85, fwd: gunLen, y: 0.95 };
   if (type === 'elite') g.scale.setScalar(1.3);
   tagMeshes(g, u);
   const ring = noRay(new THREE.Mesh(
     new THREE.RingGeometry(r + 0.12, r + 0.28, 28),
-    new THREE.MeshBasicMaterial({ color: 0x5dff9a, transparent: true, opacity: 0.9, depthWrite: false })
+    new THREE.MeshBasicMaterial({ color: 0x2dff7a, transparent: true, opacity: 0.95, depthWrite: false })
   ));
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.08; ring.visible = false;
   g.add(ring);
@@ -180,40 +301,43 @@ function makeUnit(team, type, x, z) {
   return u;
 }
 
+// bases: the duck barn (blue) and the hen coop (red), with a golden egg on the roof
 function makeBase(team, x, z) {
   const b = {
     kind: 'base', isBase: true, team, x, z, hp: 1500, maxHp: 1500, radius: 2.5, dead: false, flash: 0,
-    spawnTimer: 4, spawnCount: 0, sight: 12, shield: team === ENEMY, shieldT: 0,
+    shield: team === ENEMY,
   };
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x485566, roughness: 0.7 });
+  const bodyMat = new THREE.MeshStandardMaterial({ color: team === PLAYER ? 0x4f86c6 : 0xc8402c, roughness: 0.8 });
   b.bodyMat = bodyMat;
-  const core = new THREE.Mesh(new THREE.BoxGeometry(5, 2.4, 5), bodyMat);
-  core.position.y = 1.2;
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.35, 5.1), teamMats[team]);
-  stripe.position.y = 1.9;
-  const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.9, 2.2, 12), bodyMat);
-  tower.position.y = 3.5;
-  const beacon = new THREE.Mesh(
-    new THREE.SphereGeometry(0.5, 16, 10),
-    new THREE.MeshStandardMaterial({ color: TEAM_COLORS[team], emissive: TEAM_COLORS[team], emissiveIntensity: 1.2 })
-  );
+  const trim = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 });
+  const core = new THREE.Mesh(new THREE.BoxGeometry(5, 2.8, 5), bodyMat);
+  core.position.y = 1.4;
+  const roof = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.0, 5.4, 3, 1, false, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x5a3326, flatShading: true }));
+  roof.rotation.z = Math.PI / 2; roof.rotation.y = 0; roof.position.y = 3.75; roof.scale.set(1, 1, 1.45);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(2, 1.9, 0.1), trim);
+  door.position.set(0, 0.95, team === PLAYER ? -2.52 : 2.52);
+  const cross = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.18, 0.12), bodyMat);
+  cross.position.copy(door.position); cross.rotation.z = 0.7;
+  const cross2 = cross.clone(); cross2.rotation.z = -0.7;
+  const beacon = new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({ color: 0xffd34a, emissive: 0xffa000, emissiveIntensity: 0.7, metalness: 0.4, roughness: 0.3 }));
+  beacon.scale.set(0.5, 0.65, 0.5);
   beacon.position.y = 4.9;
-  g.add(core, stripe, tower, beacon);
+  g.add(core, roof, door, cross, cross2, beacon);
   b.beacon = beacon;
   tagMeshes(g, b);
   g.traverse(o => { if (o.isMesh) o.receiveShadow = true; });
-  if (b.shield) {
+  if (b.shield) { // a giant eggshell dome
     const sh = noRay(new THREE.Mesh(
-      new THREE.SphereGeometry(4.6, 32, 16),
-      new THREE.MeshBasicMaterial({ color: 0xff7a5a, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide })
+      new THREE.SphereGeometry(4.4, 32, 16),
+      new THREE.MeshBasicMaterial({ color: 0xfff1d0, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide })
     ));
-    sh.position.y = 1;
-    const wire = noRay(new THREE.Mesh(
-      new THREE.SphereGeometry(4.62, 18, 10),
-      new THREE.MeshBasicMaterial({ color: 0xffa080, wireframe: true, transparent: true, opacity: 0.25, depthWrite: false })
-    ));
-    sh.add(wire);
+    sh.scale.set(1, 1.3, 1);
+    sh.position.y = 0.8;
+    sh.add(noRay(new THREE.Mesh(
+      new THREE.SphereGeometry(4.42, 14, 8),
+      new THREE.MeshBasicMaterial({ color: 0xd8b98a, wireframe: true, transparent: true, opacity: 0.3, depthWrite: false })
+    )));
     g.add(sh);
     b.shieldMesh = sh;
   }
@@ -311,45 +435,6 @@ function findPath(sx, sz, tx, tz) {
   return out;
 }
 
-// ---------------------------------------------------------------- fog of war
-const fogVisible = new Uint8Array(N * N), fogExplored = new Uint8Array(N * N);
-const fogCanvas = document.createElement('canvas');
-fogCanvas.width = fogCanvas.height = N;
-const fogCtx = fogCanvas.getContext('2d');
-const fogImg = fogCtx.createImageData(N, N);
-const fogData = fogImg.data;
-const fogTex = new THREE.CanvasTexture(fogCanvas);
-fogTex.magFilter = fogTex.minFilter = THREE.LinearFilter;
-fogTex.generateMipmaps = false;
-const fogMesh = noRay(new THREE.Mesh(new THREE.PlaneGeometry(N, N), new THREE.MeshBasicMaterial({ color: 0x05080c, alphaMap: fogTex, transparent: true, depthWrite: false, fog: false })));
-fogMesh.rotation.x = -Math.PI / 2; fogMesh.position.y = 0.05; fogMesh.renderOrder = 1; fogMesh.visible = false;
-scene.add(fogMesh);
-let fogTimer = 0;
-function updateFog() {
-  fogVisible.fill(0);
-  for (const e of entities) {
-    if (e.dead || e.team !== PLAYER) continue;
-    const ci = toCell(e.x), cj = toCell(e.z), r = Math.ceil(e.sight), s2 = e.sight * e.sight;
-    for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
-      const i = ci + di, j = cj + dj;
-      if (i < 0 || j < 0 || i >= N || j >= N || di * di + dj * dj > s2) continue;
-      fogVisible[j * N + i] = 1; fogExplored[j * N + i] = 1;
-    }
-  }
-  // canvas rows run top to bottom, and the plane's top edge is world -Z, so row j is cell row j
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const c = j * N + i, o = c * 4;
-    const a = fogVisible[c] ? 0 : fogExplored[c] ? 130 : 205; // used as an alpha map (green channel)
-    fogData[o] = fogData[o + 1] = fogData[o + 2] = a; fogData[o + 3] = 255;
-  }
-  fogCtx.putImageData(fogImg, 0, 0);
-  fogTex.needsUpdate = true;
-}
-const cellVisible = (x, z) => !!fogVisible[toCell(z) * N + toCell(x)];
-function seenByPlayer(e) {
-  return e.team === PLAYER || e.isBase || e.elite || e.spotted > 0 || cellVisible(e.x, e.z);
-}
-
 // ---------------------------------------------------------------- geometry helpers
 function segHitsBox(x0, z0, x1, z1, b) {
   let tmin = 0, tmax = 1;
@@ -434,13 +519,32 @@ function ping(x, z, color, size = 1, life = 0.5) {
   scene.add(m);
   effects.push({ m, life, max: life, ring: true, size });
 }
+const feathersList = [];
+const featherGeo = new THREE.PlaneGeometry(0.16, 0.32);
+function feathers(x, z, color, n) {
+  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true });
+  for (let i = 0; i < n; i++) {
+    const m = noRay(new THREE.Mesh(featherGeo, mat));
+    m.position.set(x + (Math.random() - 0.5) * 0.6, 0.8 + Math.random() * 0.6, z + (Math.random() - 0.5) * 0.6);
+    m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+    scene.add(m);
+    feathersList.push({ m, mat, vx: (Math.random() - 0.5) * 5, vy: 2 + Math.random() * 4, vz: (Math.random() - 0.5) * 5, spin: (Math.random() - 0.5) * 10, life: 1.6 + Math.random() * 0.8 });
+  }
+}
 function updateEffects(dt) {
+  for (let i = feathersList.length - 1; i >= 0; i--) {
+    const f = feathersList[i];
+    f.life -= dt;
+    f.vy = Math.max(-1.2, f.vy - 9 * dt); f.vx *= 1 - dt * 2; f.vz *= 1 - dt * 2; // flutter down
+    f.m.position.x += f.vx * dt; f.m.position.y = Math.max(0.05, f.m.position.y + f.vy * dt); f.m.position.z += f.vz * dt;
+    f.m.rotation.x += f.spin * dt; f.m.rotation.z += f.spin * 0.6 * dt;
+    if (f.life <= 0) { scene.remove(f.m); feathersList.splice(i, 1); }
+  }
   for (const t of tracerPool) if (t.life > 0) { t.life -= dt; t.line.material.opacity = Math.max(0, t.life / t.max); if (t.life <= 0) t.line.visible = false; }
   for (let i = effects.length - 1; i >= 0; i--) {
     const e = effects[i];
     e.life -= dt;
     const k = 1 - e.life / e.max;
-    if (e.grow) { e.grow.scale.y = Math.min(1, k + 0.01); if (e.life <= 0) { e.grow.scale.y = 1; effects.splice(i, 1); } continue; }
     if (e.ring) e.m.scale.setScalar(e.size * (1 + k * 1.2));
     else e.m.scale.setScalar(e.size * (0.3 + k));
     e.m.material.opacity = Math.max(0, 1 - k);
@@ -466,10 +570,28 @@ function sfx(kind, x, z) {
     vol = (mode === 'rts' ? 0.08 : 0.18) / (1 + d * 0.12);
   }
   const now = audio.currentTime;
-  if (kind === 'beep') {
-    const o = audio.createOscillator(); o.frequency.value = 880; const og = audio.createGain();
-    og.gain.setValueAtTime(0.08, now); og.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-    o.connect(og); og.connect(audio.destination); o.start(now); o.stop(now + 0.13);
+  if (kind === 'quack' || kind === 'bawk' || kind === 'honk') {
+    // a nasal sawtooth through a formant filter, pitch falling: quack / bawk / honk
+    const base = kind === 'quack' ? 420 : kind === 'bawk' ? 700 : 260;
+    const reps = kind === 'bawk' ? 2 : 1;
+    for (let r = 0; r < reps; r++) {
+      const t0 = now + r * 0.13;
+      const o = audio.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(base, t0); o.frequency.exponentialRampToValueAtTime(base * 0.55, t0 + 0.16);
+      const bp = audio.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = kind === 'honk' ? 900 : 1500; bp.Q.value = 3;
+      const og = audio.createGain();
+      const v = x === undefined ? 0.22 : vol * 4;
+      og.gain.setValueAtTime(0.001, t0); og.gain.exponentialRampToValueAtTime(v, t0 + 0.02); og.gain.exponentialRampToValueAtTime(0.001, t0 + (kind === 'honk' ? 0.3 : 0.18));
+      o.connect(bp); bp.connect(og); og.connect(audio.destination); o.start(t0); o.stop(t0 + 0.32);
+    }
+    return;
+  }
+  if (kind === 'beep' || kind === 'chime') {
+    const o = audio.createOscillator(); const og = audio.createGain();
+    o.frequency.setValueAtTime(kind === 'chime' ? 660 : 880, now);
+    if (kind === 'chime') o.frequency.setValueAtTime(990, now + 0.1);
+    og.gain.setValueAtTime(0.08, now); og.gain.exponentialRampToValueAtTime(0.001, now + (kind === 'chime' ? 0.3 : 0.12));
+    o.connect(og); og.connect(audio.destination); o.start(now); o.stop(now + 0.32);
     return;
   }
   const src = audio.createBufferSource(); src.buffer = noiseBuf;
@@ -490,15 +612,14 @@ function sfx(kind, x, z) {
 let mode = 'menu';           // 'menu' | 'rts' | 'fps' | 'over'
 let selection = [];
 let possessed = null;
-let armed = null;            // pending RTS click action: 'amove' | 'arty' | 'cover'
-let waveTimer = 14, waveNum = 0;
-let eliteTimer = 70, eliteWarned = false;
+let amoveArmed = false;
+let waveTimer = 16, waveNum = 0;
+let eliteTimer = 75, eliteWarned = false;
 let playerBase, enemyBase;
-let markTarget = null;
-const downed = [], grenades = [], strikes = [];
-const game = { od: 60, cp: 30, linkCd: 0, slowmo: 0, time: 0 };
+const grenades = [];
+const game = { cp: CP_START, relink: 0, slowmo: 0, time: 0 };
 const rts = { focus: new THREE.Vector3(0, 0, 14), zoom: 26 };
-const fps = { yaw: 0, pitch: 0, firing: false, bob: 0, hitMarker: 0, hurt: 0, flash: 0, stickX: 0, stickY: 0, scoped: false, dashT: 0, plant: -1, spotTimer: 0 };
+const fps = { yaw: 0, pitch: 0, firing: false, bob: 0, hitMarker: 0, hurt: 0, flash: 0, stickX: 0, stickY: 0, scoped: false };
 let trans = null;            // camera transition
 const keys = new Set();
 let isTouch = false;
@@ -507,32 +628,34 @@ function setupWorld() {
   playerBase = makeBase(PLAYER, 0, 25);
   enemyBase = makeBase(ENEMY, 0, -25);
   rebuildGrid();
-  const start = [['trooper', -3, 17], ['trooper', 3, 17], ['scout', 0, 16], ['heavy', -2, 19], ['sniper', 2, 19], ['medic', 0, 19], ['trooper', -1, 17]];
+  const start = [['trooper', -3, 17], ['trooper', 3, 17], ['trooper', -1, 17], ['trooper', 1, 17], ['heavy', -2, 19], ['sniper', 2, 19]];
   for (const [t, x, z] of start) makeUnit(PLAYER, t, x, z);
   for (const [x, z, t] of [[-4, -18, 'trooper'], [4, -18, 'trooper'], [-2, -16, 'trooper'], [2, -16, 'sniper'], [0, -19, 'heavy']]) makeUnit(ENEMY, t, x, z);
-  updateFog();
 }
 
-// ---------------------------------------------------------------- radio alerts
+// ---------------------------------------------------------------- radio alerts (with optional "Drop in" action)
 const radioEl = $('radio');
 const radioGate = {};
-function radio(msg, kind = '', key = msg, gap = 0) {
+function radio(msg, kind = '', opts = {}) {
   const now = performance.now();
-  if (gap && radioGate[key] > now) return;
-  radioGate[key] = now + gap * 1000;
+  const key = opts.key || msg;
+  if (opts.gap && radioGate[key] > now) return;
+  radioGate[key] = now + (opts.gap || 0) * 1000;
   const d = document.createElement('div');
-  d.textContent = msg; if (kind) d.className = kind;
+  if (kind) d.className = kind;
+  const span = document.createElement('span'); span.textContent = msg; d.appendChild(span);
+  if (opts.dropAt) {
+    const b = document.createElement('button');
+    b.textContent = 'Drop in ▶';
+    tapButton(b, () => { dropInNear(opts.dropAt.x, opts.dropAt.z); d.remove(); });
+    d.appendChild(b);
+  }
   radioEl.appendChild(d);
   while (radioEl.children.length > 4) radioEl.removeChild(radioEl.firstChild);
-  setTimeout(() => d.classList.add('fade'), 4500);
-  setTimeout(() => d.remove(), 5200);
+  const life = opts.dropAt ? 7000 : 4500;
+  setTimeout(() => d.classList.add('fade'), life);
+  setTimeout(() => d.remove(), life + 700);
   if (kind === 'warn') sfx('beep');
-}
-function relDir(x, z) {
-  if (!possessed) return '';
-  const a = Math.atan2(-(x - possessed.x), -(z - possessed.z)) - fps.yaw;
-  const k = ((Math.round(a / (Math.PI / 2)) % 4) + 4) % 4;
-  return ['ahead', 'to your left', 'behind you', 'to your right'][k];
 }
 
 // ---------------------------------------------------------------- orders
@@ -589,16 +712,14 @@ function moveAlong(u, dt) {
   return false;
 }
 
-function canSee(u, e) { return u.team === ENEMY || seenByPlayer(e); }
 function findTarget(u, range) {
   let best = null, bs = Infinity;
   for (const e of entities) {
-    if (e.dead || e.team === u.team || !canSee(u, e)) continue;
-    const marked = e === markTarget && u.team === PLAYER;
+    if (e.dead || e.team === u.team) continue;
     const d = distTo(u, e);
-    if (d > range + (marked ? 8 : 0)) continue;
-    let s = d + (e.isBase ? 8 : 0) + (hasLOS(u, e) ? 0 : 4) - (marked ? 14 : 0);
-    if (u.elite && e.possessed) s -= 12; // the enemy commander hunts your avatar
+    if (d > range) continue;
+    let s = d + (e.isBase ? 8 : 0) + (hasLOS(u, e) ? 0 : 4);
+    if (u.elite && e.possessed) s -= 12; // the enemy elite hunts your soldier
     if (s < bs) { bs = s; best = e; }
   }
   return best;
@@ -613,11 +734,11 @@ function muzzlePos(u) {
 function aiShoot(u, t) {
   u.cool = u.rate * (0.85 + Math.random() * 0.3);
   const m = muzzlePos(u);
-  const hit = Math.random() < u.acc + (t === markTarget ? 0.15 : 0);
+  const hit = Math.random() < u.acc;
   const ty = t.isBase ? 1.5 : 1.0;
   let tx = t.x, tz = t.z;
   if (t.isBase) { const d = Math.hypot(u.x - t.x, u.z - t.z) || 1; const r = t.shield ? 4.4 : 2.4; tx = t.x + (u.x - t.x) / d * r; tz = t.z + (u.z - t.z) / d * r; }
-  const col = u.elite ? 0xffd36a : u.team === PLAYER ? 0x9fdcff : 0xffb28a;
+  const col = u.elite ? 0xffd36a : u.team === PLAYER ? 0xfff07a : 0xffffff; // corn vs seeds
   if (hit) {
     tracer(m.x, m.y, m.z, tx, ty, tz, col, u.type === 'sniper' ? 0.25 : 0.09);
     damage(t, u.dmg, u);
@@ -627,38 +748,30 @@ function aiShoot(u, t) {
   if (Math.random() < 0.5) sfx('shot', u.x, u.z);
 }
 
-function heal(t, amount) {
-  if (t.dead || t.isBase) return;
-  t.hp = Math.min(t.maxHp, t.hp + amount);
-}
-
 let shieldToast = 0;
 function damage(t, amount, src) {
   if (t.dead || amount <= 0) return;
   if (t.isBase && t.shield) {
     if (Math.random() < 0.3) burst(t.x + (Math.random() - 0.5) * 6, 1 + Math.random() * 3, t.z + (Math.random() - 0.5) * 6, 0.4, 0xffa080);
-    if (src && src.possessed && performance.now() > shieldToast) { shieldToast = performance.now() + 3000; toast('Shielded! Get close and plant a charge (G)', 1.5); }
+    if (src && src.possessed && performance.now() > shieldToast) { shieldToast = performance.now() + 3000; toast('Eggshell shield! Hold all 3 nests to crack it', 1.5); }
     return;
   }
   if (t.armorT > 0) amount *= 0.5;
   t.hp -= amount;
   t.flash = 0.12;
   if (t.possessed) fps.hurt = 0.5;
-  if (t === playerBase) radio('Command post under attack!', 'warn', 'base', 10);
-  else if (t.team === PLAYER && !t.possessed && mode === 'fps' && possessed && Math.hypot(t.x - possessed.x, t.z - possessed.z) > 14) {
-    radio(`Squad under fire ${relDir(t.x, t.z)}`, 'warn', 'squad', 8);
-  }
-  if (!t.isBase && !t.possessed && t.order.type === 'idle' && src && src.kind === 'unit' && !src.dead && canSee(t, src)) t.order = { type: 'attack', target: src, auto: true };
+  if (t === playerBase) radio('Our barn is under attack!', 'warn', { key: 'base', gap: 10, dropAt: playerBase });
+  if (!t.isBase && !t.possessed && t.order.type === 'idle' && src && src.kind === 'unit' && !src.dead) t.order = { type: 'attack', target: src, auto: true };
   if (t.hp <= 0) kill(t, src);
 }
 
 const cap = s => s[0].toUpperCase() + s.slice(1);
 function kill(e, src) {
   e.dead = true;
-  burst(e.x, e.isBase ? 2 : 1, e.z, e.isBase ? 6 : 1.6, e.isBase ? 0xffaa44 : 0xffcc66);
-  sfx('boom', e.x, e.z);
+  burst(e.x, e.isBase ? 2 : 1, e.z, e.isBase ? 6 : 1.2, e.isBase ? 0xffaa44 : 0xffffff);
+  feathers(e.x, e.z, e.isBase ? 0xffe6a0 : e.elite ? 0xffc340 : e.team === PLAYER ? 0xffd84a : 0xffffff, e.isBase ? 40 : 14);
+  sfx(e.isBase ? 'boom' : e.team === PLAYER ? 'quack' : 'bawk', e.x, e.z);
   scene.remove(e.mesh);
-  if (e === markTarget) markTarget = null;
   if (e.isBase) {
     const i = boxes.indexOf(e.box); if (i >= 0) boxes.splice(i, 1);
     rebuildGrid();
@@ -666,51 +779,14 @@ function kill(e, src) {
     return;
   }
   if (e.team === ENEMY) {
-    game.cp = Math.min(CP_MAX, game.cp + 4);
-    if (src && src.possessed) game.od = Math.min(100, game.od + 10);
-    if (e.elite) { game.od = Math.min(100, game.od + 40); game.cp = Math.min(CP_MAX, game.cp + 40); radio('Enemy elite destroyed! +40 Overdrive, +40 CP', 'good'); }
-  } else {
-    addDowned(e);
-    if (e === possessed) {
-      game.linkCd = LINK_CD; game.od = Math.max(0, game.od - 25);
-      radio(`Link lost. Relink in ${LINK_CD}s. A medic can still revive them.`, 'warn');
-      rts.focus.set(e.x, 0, e.z);
-      possessed = null;
-      exitFPS();
-    } else {
-      radio(`${cap(e.type)} down`, 'warn', 'lost', 4);
-    }
-  }
-}
-
-// ---------------------------------------------------------------- downed / revive
-const downedGeo = new THREE.RingGeometry(0.35, 0.55, 20);
-function addDowned(u) {
-  const mat = new THREE.MeshBasicMaterial({ color: 0x46e08a, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
-  const m = noRay(new THREE.Mesh(downedGeo, mat));
-  m.rotation.x = -Math.PI / 2; m.position.set(u.x, 0.1, u.z);
-  m.add(noRay(new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.14), mat)), noRay(new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.5), mat)));
-  scene.add(m);
-  downed.push({ type: u.type, x: u.x, z: u.z, t: 14, prog: 0, mesh: m });
-}
-function updateDowned(dt) {
-  for (let i = downed.length - 1; i >= 0; i--) {
-    const d = downed[i];
-    d.t -= dt;
-    const medic = entities.find(e => !e.dead && e.type === 'medic' && e.team === PLAYER && Math.hypot(e.x - d.x, e.z - d.z) < 1.8);
-    if (medic) {
-      d.prog += dt;
-      if (d.prog >= 2.2) {
-        const u = makeUnit(PLAYER, d.type, d.x, d.z);
-        u.hp = u.maxHp * 0.5;
-        burst(d.x, 1, d.z, 1.2, 0x46e08a);
-        radio(`${cap(d.type)} revived by medic`, 'good');
-        d.t = 0;
-      }
-    }
-    d.mesh.material.opacity = 0.3 + 0.5 * Math.abs(Math.sin(performance.now() / (medic ? 90 : 300)));
-    d.mesh.scale.setScalar(Math.max(0.001, Math.min(1, d.t / 3)));
-    if (d.t <= 0) { scene.remove(d.mesh); downed.splice(i, 1); }
+    game.cp = Math.min(CP_MAX, game.cp + 3);
+    if (e.elite) { game.cp = Math.min(CP_MAX, game.cp + 40); radio('The Big Rooster is plucked! +40 corn', 'good'); }
+  } else if (e === possessed) {
+    game.relink = RELINK_CD;
+    radio(`Your ${nameOf(e).toLowerCase()} got cooked. Drop in again in ${RELINK_CD}s.`, 'warn');
+    rts.focus.set(e.x, 0, e.z);
+    possessed = null;
+    exitFPS();
   }
 }
 
@@ -720,9 +796,7 @@ function updateUnit(u, dt) {
   u.abilityCd -= dt;
   u.armorT -= dt;
   u.moving = false;
-  if (u.spotted > 0) u.spotted -= dt;
   if (u.possessed) return;
-  if (u.type === 'medic' && medicSupport(u, dt)) return;
   const o = u.order;
   let target = null;
   if (o.type === 'attack') {
@@ -733,7 +807,7 @@ function updateUnit(u, dt) {
   }
   if (target) {
     const d = distTo(u, target);
-    if (d <= u.range && hasLOS(u, target) && canSee(u, target)) {
+    if (d <= u.range && hasLOS(u, target)) {
       u.path = null; u.pathGoal = null;
       u.facing = angleLerp(u.facing, facingFor(target.x - u.x, target.z - u.z), Math.min(1, dt * 12));
       if (u.cool <= 0) aiShoot(u, target);
@@ -748,32 +822,6 @@ function updateUnit(u, dt) {
     pathTo(u, o.x, o.z);
     if (moveAlong(u, dt)) u.order = { type: 'idle' };
   }
-}
-
-// medics heal the most hurt ally nearby and walk to downed allies; returns true if busy
-function medicSupport(u, dt) {
-  let best = null, bk = 0.95;
-  for (const e of entities) {
-    if (e.dead || e.isBase || e.team !== u.team || e === u) continue;
-    if (Math.hypot(e.x - u.x, e.z - u.z) > 7) continue;
-    const k = e.hp / e.maxHp;
-    if (k < bk) { bk = k; best = e; }
-  }
-  const reviveTarget = u.team === PLAYER && u.order.type !== 'move' && u.order.type !== 'attack'
-    ? downed.find(dd => Math.hypot(dd.x - u.x, dd.z - u.z) < 14) : null;
-  if (best && (bk < 0.5 || !reviveTarget)) {
-    heal(best, 10 * dt);
-    u.facing = angleLerp(u.facing, facingFor(best.x - u.x, best.z - u.z), Math.min(1, dt * 10));
-    u.healTick -= dt;
-    if (u.healTick <= 0) { u.healTick = 0.35; const m = muzzlePos(u); tracer(m.x, m.y, m.z, best.x, 1.1, best.z, 0x46e08a, 0.2); }
-    return true;
-  }
-  if (reviveTarget) {
-    const d = reviveTarget;
-    if (Math.hypot(d.x - u.x, d.z - u.z) > 0.8) { pathTo(u, d.x, d.z); moveAlong(u, dt); }
-    return true;
-  }
-  return false;
 }
 
 function separate() {
@@ -794,56 +842,111 @@ function separate() {
 
 const countUnits = team => entities.reduce((n, e) => n + (!e.dead && !e.isBase && e.team === team ? 1 : 0), 0);
 
+// capture: only your possessed soldier captures for you; any enemy soldier captures for them
+function updatePoints(dt) {
+  for (const p of points) {
+    const inside = e => !e.dead && !e.isBase && Math.hypot(e.x - p.x, e.z - p.z) < POINT_R;
+    const you = possessed && inside(possessed);
+    const foes = entities.filter(e => e.team === ENEMY && inside(e)).length;
+    const before = p.prog;
+    p.contested = you && foes > 0;
+    if (!p.contested) {
+      if (you) p.prog = Math.min(1, p.prog + dt / 3);
+      else if (foes) p.prog = Math.max(-1, p.prog - dt * Math.min(0.4, 0.12 * foes));
+    }
+    p.capturing = you && !p.contested && p.prog < 1;
+    // ownership flips at the ends, and is lost when the bar crosses the middle
+    if (p.prog >= 1 && p.owner !== PLAYER) {
+      p.owner = PLAYER; sfx('chime'); burst(p.x, 1, p.z, 3, TEAM_COLORS[PLAYER]);
+      radio(`Nest ${p.name} is ours! +${CP_PER_POINT} corn/s`, 'good');
+      onPointsChanged();
+    } else if (p.prog <= -1 && p.owner !== ENEMY) {
+      p.owner = ENEMY;
+      radio(`The hens stole nest ${p.name}`, 'warn', { dropAt: p });
+      onPointsChanged();
+    } else if ((p.owner === PLAYER && p.prog <= 0) || (p.owner === ENEMY && p.prog >= 0)) {
+      p.owner = null; onPointsChanged();
+    }
+    if (p.owner === PLAYER && foes && !you && p.prog < before) {
+      radio(`Hens are pecking at nest ${p.name}!`, 'warn', { key: 'atk' + p.name, gap: 9, dropAt: p });
+    }
+    // visuals
+    const col = pointColor(p);
+    p.rim.material.color.setHex(col); p.flag.material.color.setHex(col); p.disc.material.color.setHex(col);
+    p.disc.material.opacity = p.capturing ? 0.22 + Math.sin(game.time * 8) * 0.06 : 0.12;
+    p.flag.position.y = 1.0 + (p.capturing ? Math.abs(Math.sin(game.time * 10)) * 0.25 : 0);
+    p.flag.scale.set(1 + Math.abs(p.prog) * 0.25, 1.35 + Math.abs(p.prog) * 0.35, 1 + Math.abs(p.prog) * 0.25);
+    const k = Math.abs(p.prog);
+    if (Math.abs(k - p.lastArc) > 0.01) {
+      p.lastArc = k;
+      p.arc.geometry.dispose();
+      p.arc.geometry = new THREE.RingGeometry(POINT_R + 0.1, POINT_R + 0.45, 48, 1, Math.PI / 2, Math.max(0.001, k * Math.PI * 2));
+    }
+    p.arc.material.color.setHex(p.prog >= 0 ? TEAM_COLORS[PLAYER] : TEAM_COLORS[ENEMY]);
+    p.arc.visible = k > 0.01;
+  }
+}
+
+function onPointsChanged() {
+  const all = playerPointCount() === points.length;
+  if (all && enemyBase.shield) {
+    enemyBase.shield = false; enemyBase.shieldMesh.visible = false;
+    burst(enemyBase.x, 2, enemyBase.z, 5, 0xffa080);
+    radio('All 3 nests are ours: the eggshell cracked! Raid the coop!', 'good');
+    commandMove(playerUnits().filter(e => !e.possessed), enemyBase.x, enemyBase.z + 6, 'amove', true);
+    toast('Shell cracked! Raid the hen coop', 2.5);
+  } else if (!all && !enemyBase.shield && !enemyBase.dead) {
+    enemyBase.shield = true; enemyBase.shieldMesh.visible = true;
+    radio('We lost a nest: the coop is shelled up again', 'warn');
+  }
+}
+
 function spawnPlayer(type) {
   const u = makeUnit(PLAYER, type, (Math.random() - 0.5) * 3, 21.5);
   commandMove([u], (Math.random() - 0.5) * 8, 17 - Math.random() * 2, 'move', true);
   return u;
 }
 
+function buy(type) {
+  if (mode !== 'rts') return;
+  if (countUnits(PLAYER) >= PLAYER_CAP) { toast('The flock is full', 1); return; }
+  if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} corn`, 1); return; }
+  game.cp -= COSTS[type];
+  const u = spawnPlayer(type);
+  selection = [...liveSelection(), u];
+  updateButtons();
+  ping(u.x, u.z, 0x5dff9a);
+}
+
 function updateBases(dt) {
-  if (!playerBase.dead) {
-    playerBase.spawnTimer -= dt;
-    if (playerBase.spawnTimer <= 0) {
-      playerBase.spawnTimer = 9;
-      if (countUnits(PLAYER) < PLAYER_CAP) {
-        const type = REINFORCE_CYCLE[playerBase.spawnCount++ % REINFORCE_CYCLE.length];
-        spawnPlayer(type);
-        radio(`${cap(type)} reinforcement ready`, 'good', 'reinf', 3);
-      }
-    }
-  }
   if (!enemyBase.dead) {
     waveTimer -= dt;
     if (waveTimer <= 0) {
       waveNum++;
-      waveTimer = Math.max(14, 24 - waveNum);
-      const n = Math.min(3 + Math.floor(waveNum * 0.8), 10);
+      waveTimer = Math.max(16, 26 - waveNum);
+      const n = Math.min(3 + Math.floor(waveNum * 0.7), 9);
+      // send the wave at a point the enemy doesn't own yet, preferring yours
+      const targets = points.filter(p => p.owner !== ENEMY);
+      const pt = (targets.find(p => p.owner === PLAYER) || targets[Math.floor(Math.random() * targets.length)] || points[waveNum % 3]);
       const spawned = [];
       for (let i = 0; i < n && countUnits(ENEMY) < ENEMY_CAP; i++) {
         const type = i % 4 === 3 ? 'sniper' : i % 3 === 2 ? 'heavy' : 'trooper';
         spawned.push(makeUnit(ENEMY, type, (Math.random() - 0.5) * 8, -21 - Math.random() * 1.5));
       }
-      const laneIdx = waveNum % 3;
-      commandMove(spawned, [-14, 0, 14][laneIdx], 2, 'amove', true);
-      spawned.forEach(u => (u.order.next = { x: 0, z: 24 }));
-      if (spawned.length) radio(`Enemy wave ${waveNum} moving down the ${['west', 'center', 'east'][laneIdx]} lane`, 'warn');
+      commandMove(spawned, pt.x, pt.z, 'amove', true);
+      spawned.forEach(u => (u.order.point = pt));
+      if (spawned.length) radio(`Hen wave ${waveNum} is heading for nest ${pt.name}`, 'warn', { dropAt: pt });
     }
-    // the enemy commander drops into an elite unit
     eliteTimer -= dt;
     const eliteAlive = entities.some(e => e.elite && !e.dead);
-    if (!eliteAlive && eliteTimer <= 5 && !eliteWarned) { eliteWarned = true; radio('Enemy commander dropping into an elite in 5s!', 'warn'); }
+    if (!eliteAlive && eliteTimer <= 5 && !eliteWarned) { eliteWarned = true; radio('The Big Rooster wakes up in 5s!', 'warn'); }
     if (eliteTimer <= 0) {
-      eliteTimer = 80; eliteWarned = false;
+      eliteTimer = 90; eliteWarned = false;
       if (!eliteAlive) {
         const e = makeUnit(ENEMY, 'elite', 0, -20);
-        e.order = { type: 'amove', x: 0, z: 24 };
-        radio('Enemy elite deployed. Drop in and duel it!', 'warn');
-        toast('⚠ Enemy elite on the field', 2);
+        e.order = { type: 'amove', x: 0, z: 0 };
+        radio('The Big Rooster is out. It hunts YOUR duck!', 'warn', { dropAt: { x: 0, z: 0 } });
       }
-    }
-    if (!enemyBase.shield) {
-      enemyBase.shieldT -= dt;
-      if (enemyBase.shieldT <= 0) { enemyBase.shield = true; enemyBase.shieldMesh.visible = true; radio('Enemy shield is back up', 'warn'); }
     }
     enemyBase.shieldMesh.material.opacity = 0.13 + Math.sin(game.time * 3) * 0.04;
   }
@@ -862,28 +965,33 @@ function updateEnemyOrders(dt) {
       }
       continue;
     }
-    // two-leg route: lane waypoint, then the player's base
-    if (u.order.next) u.lastNext = u.order.next;
-    if (u.order.type === 'idle' && u.lastNext) {
-      u.order = { type: 'amove', x: u.lastNext.x + (Math.random() - 0.5) * 4, z: u.lastNext.z + (Math.random() - 0.5) * 3 };
-      u.path = null; u.pathGoal = null; u.lastNext = null;
+    if (u.order.point) u.homePoint = u.order.point;
+    // squads sit on their point until it's theirs, then push on to your post
+    if (u.order.type === 'idle' && u.homePoint) {
+      const p = u.homePoint;
+      if (p.owner === ENEMY) {
+        u.homePoint = null;
+        u.order = { type: 'amove', x: (Math.random() - 0.5) * 6, z: 22 }; u.path = null; u.pathGoal = null;
+      } else if (Math.hypot(u.x - p.x, u.z - p.z) > POINT_R - 0.5) {
+        u.order = { type: 'amove', x: p.x + (Math.random() - 0.5) * 2, z: p.z + (Math.random() - 0.5) * 2, point: p }; u.path = null; u.pathGoal = null;
+      }
     }
   }
   if (eliteRetarget <= 0) eliteRetarget = 1.5;
 }
 
-function explode(x, z, r, dmg, src, friendlyFire) {
+function explode(x, z, r, dmg, src) {
   burst(x, 0.8, z, r * 0.9, 0xffaa55);
   burst(x, 0.4, z, r * 0.5, 0xffffff);
   sfx('boom', x, z);
   for (const e of entities) {
-    if (e.dead || (!friendlyFire && src && e.team === src.team)) continue;
+    if (e.dead || (src && e.team === src.team)) continue;
     const d = Math.hypot(e.x - x, e.z - z) - (e.isBase ? e.radius : 0);
     if (d < r) damage(e, dmg * (1 - Math.max(0, d) / r * 0.5), src);
   }
 }
 
-function updateProjectiles(dt) {
+function updateGrenades(dt) {
   for (let i = grenades.length - 1; i >= 0; i--) {
     const g = grenades[i];
     g.t += dt;
@@ -893,19 +1001,8 @@ function updateProjectiles(dt) {
     const inBox = boxes.some(b => g.pos.y < 2 && g.pos.x > b.minX && g.pos.x < b.maxX && g.pos.z > b.minZ && g.pos.z < b.maxZ);
     if (g.pos.y <= 0.15 || inBox || g.t > 2) {
       scene.remove(g.mesh);
-      explode(g.pos.x, g.pos.z, 3.4, 60, g.src, false);
+      explode(g.pos.x, g.pos.z, 3.4, 60, g.src);
       grenades.splice(i, 1);
-    }
-  }
-  for (let i = strikes.length - 1; i >= 0; i--) {
-    const s = strikes[i];
-    s.t -= dt;
-    s.shell -= dt;
-    if (s.shell <= 0 && s.t > 0) { s.shell = 0.4; ping(s.x, s.z, 0xff4422, 4.5, 0.4); }
-    if (s.t <= 0) {
-      for (let k = 0; k < 3; k++) burst(s.x + (Math.random() - 0.5) * 4, 0.5, s.z + (Math.random() - 0.5) * 4, 2.5, 0xff8844);
-      explode(s.x, s.z, 4.5, 80, { team: -1, kind: 'strike' }, true);
-      strikes.splice(i, 1);
     }
   }
 }
@@ -913,53 +1010,55 @@ function updateProjectiles(dt) {
 // ---------------------------------------------------------------- FPS control
 const viewmodel = new THREE.Group();
 {
-  const gunMat = new THREE.MeshStandardMaterial({ color: 0x5b6878, roughness: 0.45, metalness: 0.3, emissive: 0x1a2230 });
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.5), gunMat);
+  const gunMat = new THREE.MeshStandardMaterial({ color: 0x3f8a3a, roughness: 0.45, emissive: 0x0f2a10 });
+  const gun = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.5, 10), gunMat);
+  gun.rotation.x = Math.PI / 2;
   gun.position.z = -0.27;
   const sight = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.08), visorMat);
   sight.position.set(0, 0.07, -0.18);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.07), gunMat);
-  grip.position.set(0, -0.1, -0.08);
-  viewmodel.add(gun, sight, grip);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.1), visorMat); // corn hopper
+  grip.position.set(0, 0.07, -0.05); viewmodel.add(grip);
+  const wing = new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({ color: 0xffd84a, roughness: 0.7 })); // your feathery wing
+  wing.scale.set(0.07, 0.06, 0.2); wing.position.set(0.02, -0.08, -0.02); wing.rotation.x = 0.3;
+  viewmodel.add(gun, sight, wing);
   const muzzle = new THREE.Object3D(); muzzle.position.z = -0.58; viewmodel.add(muzzle);
   viewmodel.userData.muzzle = muzzle;
   const flash = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe08a }));
   flash.position.z = -0.62; flash.visible = false; viewmodel.add(flash);
   viewmodel.userData.flash = flash;
-  viewmodel.position.set(0.2, -0.2, -0.35);
+  viewmodel.position.set(0.22, -0.22, -0.35);
+  viewmodel.scale.setScalar(0.8);
   viewmodel.visible = false;
   viewmodel.traverse(noRay);
   camera.add(viewmodel);
 }
-const markMesh = noRay(new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.7, 4), new THREE.MeshBasicMaterial({ color: 0xff3030 })));
-markMesh.visible = false;
-scene.add(markMesh);
 
 const raycaster = new THREE.Raycaster();
 const tmpV = new THREE.Vector3();
 
-function canPossessNow(swap) {
-  if (game.linkCd > 0) { toast(`Link recharging: ${Math.ceil(game.linkCd)}s`, 1.2); return false; }
-  if (!swap && game.od < OD_MIN) { toast(`Overdrive charging (${Math.floor(game.od)}/${OD_MIN})`, 1.2); return false; }
-  if (swap && game.od <= 5) { toast('Overdrive too low', 1); return false; }
-  return true;
-}
-
 function possess(u) {
   if (!u || u.dead || u.isBase || u.team !== PLAYER) return;
+  if (game.relink > 0) { toast(`Drop in again in ${Math.ceil(game.relink)}s`, 1.2); return; }
   const swap = mode === 'fps';
-  if (!canPossessNow(swap)) return;
   if (possessed && possessed !== u) { possessed.possessed = false; possessed.mesh.visible = true; possessed.order = { type: 'idle' }; }
   possessed = u;
   u.possessed = true; u.order = { type: 'idle' }; u.path = null;
   u.mesh.visible = false;
-  fps.yaw = u.facing; fps.pitch = -0.05; fps.firing = false; fps.plant = -1; setScoped(false);
+  fps.yaw = u.facing; fps.pitch = -0.05; fps.firing = false; setScoped(false);
   if (!selection.includes(u)) selection.push(u);
   game.slowmo = swap ? 0.6 : 1.3;
   setMode('fps', swap ? 3 : 9);
   sfx('whoosh');
   if (!isTouch && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch { /* ignore */ } }
-  toast(`${cap(u.type)}: ${TYPES[u.type].ability}`, 1.2);
+  toast(`You are a ${nameOf(u)} · ${TYPES[u.type].ability} (Q)`, 1.2);
+  sfx('quack');
+}
+
+function dropInNear(x, z) {
+  const mine = playerUnits();
+  if (!mine.length) { toast('No birds left', 1); return; }
+  mine.sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z));
+  possess(mine[0]);
 }
 
 function exitFPS() {
@@ -968,47 +1067,28 @@ function exitFPS() {
     rts.focus.set(possessed.x, 0, possessed.z);
     possessed = null;
   }
-  fps.firing = false; fps.plant = -1; setScoped(false);
-  document.body.classList.remove('canplant', 'planting');
+  fps.firing = false; setScoped(false);
   if (document.pointerLockElement) document.exitPointerLock();
   if (mode !== 'over') setMode('rts');
 }
 
 function swapUnit() {
   const mine = playerUnits();
-  if (mine.length < 2) { toast('No other units', 1); return; }
+  if (mine.length < 2) { toast('No other birds', 1); return; }
   const i = mine.indexOf(possessed);
   possess(mine[(i + 1) % mine.length]);
 }
 
-function aimRay(far = 90) {
-  raycaster.setFromCamera({ x: 0, y: 0 }, camera);
-  raycaster.far = far;
-}
 function rally() {
-  aimRay(80);
+  raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+  raycaster.far = 80;
   const hit = raycaster.intersectObjects(staticShootables, false)[0];
   if (!hit) { toast('Aim at the ground to rally', 1); return; }
   let squad = liveSelection();
   if (!squad.length) squad = playerUnits().filter(e => !e.possessed && Math.hypot(e.x - possessed.x, e.z - possessed.z) < 14);
   if (!squad.length) { toast('No squad nearby', 1); return; }
   commandMove(squad, hit.point.x, hit.point.z, 'amove');
-  radio(`Squad of ${squad.length} moving to your mark`, 'good');
-}
-
-function shootTargets() {
-  return staticShootables.concat(entities.filter(e => !e.dead && !e.possessed).map(e => e.mesh));
-}
-function markAim() {
-  if (!possessed) return;
-  aimRay(120);
-  const hit = raycaster.intersectObjects(shootTargets(), true)[0];
-  const ent = hit && hit.object.userData.entity;
-  if (!ent || ent.team !== ENEMY) { toast('Aim at an enemy to mark it', 1); return; }
-  markTarget = ent;
-  ent.spotted = 20;
-  radio(`${ent.isBase ? 'Enemy post' : cap(ent.type)} marked: all units focus fire`, 'good');
-  sfx('beep');
+  radio(`${squad.length} birds waddling to where you aimed`, 'good');
 }
 
 function setScoped(on) {
@@ -1027,16 +1107,11 @@ function useAbility() {
     camera.updateMatrixWorld(true);
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
     const pos = camera.position.clone().addScaledVector(dir, 0.6);
-    const mesh = noRay(new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), darkMat));
+    const mesh = noRay(new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({ color: 0xfff6e0 }))); mesh.scale.set(0.12, 0.16, 0.12);
     scene.add(mesh);
     grenades.push({ pos, vel: dir.multiplyScalar(15).add(new THREE.Vector3(0, 4, 0)), t: 0, mesh, src: u });
   } else if (u.type === 'heavy') {
-    u.armorT = 5; toast('Armor up: half damage for 5s', 1);
-  } else if (u.type === 'scout') {
-    fps.dashT = 0.25; sfx('whoosh');
-  } else if (u.type === 'medic') {
-    for (const e of playerUnits()) if (Math.hypot(e.x - u.x, e.z - u.z) < 7) { heal(e, 45); burst(e.x, 1, e.z, 0.6, 0x46e08a); }
-    ping(u.x, u.z, 0x46e08a, 5, 0.6);
+    u.armorT = 5; sfx('honk'); toast('HONK! Half damage for 5s', 1);
   }
 }
 
@@ -1045,12 +1120,12 @@ function playerShoot(u) {
   const spread = fps.scoped ? 0.001 : u.type === 'heavy' ? 0.02 : u.type === 'sniper' ? 0.03 : 0.01;
   raycaster.setFromCamera({ x: (Math.random() - 0.5) * spread * 2, y: (Math.random() - 0.5) * spread * 2 }, camera);
   raycaster.far = 120;
-  const hit = raycaster.intersectObjects(shootTargets(), true)[0];
+  const targets = staticShootables.concat(entities.filter(e => !e.dead && !e.possessed).map(e => e.mesh));
+  const hit = raycaster.intersectObjects(targets, true)[0];
   camera.updateMatrixWorld(true);
   const mz = fps.scoped ? camera.position.clone().add(new THREE.Vector3(0, -0.2, 0)) : viewmodel.userData.muzzle.getWorldPosition(new THREE.Vector3());
   const end = hit ? hit.point : raycaster.ray.at(120, new THREE.Vector3());
-  const isMedic = u.type === 'medic';
-  tracer(mz.x, mz.y, mz.z, end.x, end.y, end.z, isMedic ? 0x7dffb0 : 0xfff2b0, u.type === 'sniper' ? 0.3 : 0.09);
+  tracer(mz.x, mz.y, mz.z, end.x, end.y, end.z, 0xfff2b0, u.type === 'sniper' ? 0.3 : 0.09);
   viewmodel.userData.flash.visible = true; fps.flash = 0.045;
   viewmodel.position.z = -0.29;
   if (u.type === 'sniper') fps.pitch = Math.min(1.4, fps.pitch + 0.03); // recoil kick
@@ -1059,43 +1134,14 @@ function playerShoot(u) {
   const ent = hit.object.userData.entity;
   if (ent && ent.team !== u.team) {
     let dmg = u.dmg * POSSESS_DMG;
-    if (u.type === 'sniper' && !ent.isBase && hit.point.y > 1.25 * (ent.elite ? 1.3 : 1)) { dmg *= 2.5; toast('Headshot!', 0.6); }
+    if (u.type === 'sniper' && !ent.isBase && hit.point.y > 1.25 * (ent.elite ? 1.3 : 1)) { dmg *= 2.5; toast('Beak shot!', 0.6); }
     damage(ent, dmg, u);
-    ent.spotted = Math.max(ent.spotted || 0, 6);
     fps.hitMarker = 0.15;
     sfx('hit');
     burst(end.x, end.y, end.z, 0.35, 0xffe0a0);
-  } else if (ent && isMedic && !ent.isBase) {
-    heal(ent, 14);
-    burst(end.x, end.y, end.z, 0.35, 0x46e08a);
   } else {
     burst(end.x, end.y, end.z, 0.2, 0xb0b8c4);
   }
-}
-
-const frustum = new THREE.Frustum(), projM = new THREE.Matrix4();
-function spotFromView() {
-  const u = possessed;
-  camera.updateMatrixWorld(true);
-  projM.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-  frustum.setFromProjectionMatrix(projM);
-  const range = u.type === 'scout' ? 55 : fps.scoped ? 70 : 35;
-  let fresh = 0, freshSniper = false;
-  for (const e of entities) {
-    if (e.dead || e.team !== ENEMY || e.isBase) continue;
-    if (Math.hypot(e.x - u.x, e.z - u.z) > range) continue;
-    if (!frustum.containsPoint(tmpV.set(e.x, 1, e.z)) || !hasLOS(u, e)) continue;
-    if (!(e.spotted > 0) && !cellVisible(e.x, e.z)) { fresh++; if (e.type === 'sniper') freshSniper = true; }
-    e.spotted = 8;
-  }
-  if (freshSniper) radio('Hidden sniper spotted: now visible to the army', 'good', 'spot-s', 4);
-  else if (fresh) radio(`Spotted ${fresh} hidden ${fresh > 1 ? 'enemies' : 'enemy'}`, 'good', 'spot', 4);
-}
-
-const canPlant = () => !!possessed && !enemyBase.dead && enemyBase.shield && distTo(possessed, enemyBase) < 2.6;
-function startPlant() {
-  if (!canPlant()) { toast('Get next to the enemy post to plant', 1); return; }
-  if (fps.plant < 0) { fps.plant = 0; sfx('beep'); }
 }
 
 function updateFPS(dt, simDt) {
@@ -1111,84 +1157,12 @@ function updateFPS(dt, simDt) {
   if (len > 1) { f /= len; s /= len; }
   const yaw = fps.yaw;
   const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
-  let sp = u.speed * 1.15 * (fps.scoped ? 0.45 : 1);
-  if (fps.dashT > 0) { fps.dashT -= simDt; sp *= 4.5; if (len < 0.1) f = 1; }
+  const sp = u.speed * 1.15 * (fps.scoped ? 0.45 : 1);
   u.x += (fx * f + rx * s) * sp * simDt;
   u.z += (fz * f + rz * s) * sp * simDt;
   u.facing = yaw;
   if (len > 0.1) fps.bob += simDt * 9 * Math.min(1, len);
   if (fps.firing && u.cool <= 0) playerShoot(u);
-  // overdrive drains while linked
-  game.od -= OD_DRAIN * simDt;
-  if (game.od <= 0) { game.od = 0; radio('Overdrive depleted. Back to command.', 'warn'); exitFPS(); return; }
-  fps.spotTimer -= dt;
-  if (fps.spotTimer <= 0) { fps.spotTimer = 0.2; spotFromView(); }
-  // planting the shield charge
-  const cp = canPlant();
-  document.body.classList.toggle('canplant', cp && fps.plant < 0);
-  if (fps.plant >= 0) {
-    if (!cp) { fps.plant = -1; toast('Plant interrupted', 1); }
-    else {
-      fps.plant += simDt;
-      if (fps.plant >= PLANT_TIME) {
-        fps.plant = -1;
-        enemyBase.shield = false; enemyBase.shieldT = SHIELD_DOWN_TIME; enemyBase.shieldMesh.visible = false;
-        burst(enemyBase.x, 2, enemyBase.z, 5, 0xffa080);
-        sfx('boom');
-        radio(`Shield down for ${SHIELD_DOWN_TIME}s! All units attacking the post`, 'good');
-        commandMove(playerUnits().filter(e => !e.possessed), enemyBase.x, enemyBase.z + 6, 'amove', true);
-        markTarget = enemyBase;
-      }
-    }
-  }
-  document.body.classList.toggle('planting', fps.plant >= 0);
-  $('plantFill').style.width = `${Math.max(0, fps.plant) / PLANT_TIME * 100}%`;
-}
-
-// ---------------------------------------------------------------- RTS powers
-function canAfford(p) {
-  if (game.cp < POWERS[p]) { toast(`Need ${POWERS[p]} command points`, 1); return false; }
-  return true;
-}
-function armPower(p) {
-  if (mode !== 'rts' || !canAfford(p)) return;
-  if (p === 'reinf') {
-    game.cp -= POWERS.reinf;
-    const types = ['trooper', 'trooper', ['scout', 'sniper', 'medic', 'heavy'][Math.floor(Math.random() * 4)]];
-    types.forEach(t => spawnPlayer(t));
-    radio('Reinforcement squad deployed at your post', 'good');
-    return;
-  }
-  armed = armed === p ? null : p;
-  updateButtons();
-  if (armed) toast(p === 'arty' ? 'Pick a visible target area' : 'Pick where to drop cover', 1.2);
-}
-function firePower(p, gp) {
-  if (p === 'arty') {
-    if (!cellVisible(gp.x, gp.z)) { toast('No vision there. Spot it first!', 1.2); return false; }
-    game.cp -= POWERS.arty;
-    strikes.push({ x: gp.x, z: gp.z, t: 1.6, shell: 0 });
-    radio('Artillery inbound', 'good');
-    return true;
-  }
-  if (p === 'cover') {
-    const w = 4, d = 0.9, h = 1.6;
-    const box = { minX: gp.x - w / 2, maxX: gp.x + w / 2, minZ: gp.z - d / 2, maxZ: gp.z + d / 2 };
-    const pad = 0.4;
-    const clash = boxes.some(b => b.minX < box.maxX + pad && b.maxX > box.minX - pad && b.minZ < box.maxZ + pad && b.maxZ > box.minZ - pad)
-      || entities.some(e => !e.dead && !e.isBase && e.x > box.minX - e.radius && e.x < box.maxX + e.radius && e.z > box.minZ - e.radius && e.z < box.maxZ + e.radius)
-      || Math.abs(gp.x) > HALF - 3 || Math.abs(gp.z) > HALF - 2;
-    if (clash) { toast("Can't place cover there", 1); return false; }
-    game.cp -= POWERS.cover;
-    const m = addObstacle(gp.x, gp.z, w, d, h, coverMat);
-    m.scale.y = 0.01;
-    effects.push({ grow: m, life: 0.4, max: 0.4 });
-    rebuildGrid();
-    for (const e of entities) { e.path = null; e.pathGoal = null; }
-    ping(gp.x, gp.z, 0x7fb8ff, 2);
-    return true;
-  }
-  return false;
 }
 
 // ---------------------------------------------------------------- camera
@@ -1212,8 +1186,10 @@ function setMode(m, arc = 0) {
   mode = m;
   document.body.classList.toggle('fps', m === 'fps');
   viewmodel.visible = m === 'fps' && !fps.scoped;
-  fogMesh.visible = m === 'rts' || m === 'over';
-  armed = null;
+  amoveArmed = false;
+  const tag = $('modeTag');
+  tag.innerHTML = m === 'fps' ? '<b>DUCK MODE</b> stand on nests · fight' : '<b>COMMANDER</b> move the flock · buy birds';
+  tag.className = m === 'fps' ? 'op' : '';
   updateButtons();
   if ((prev === 'rts' || prev === 'fps') && (m === 'rts' || m === 'fps')) {
     trans = { t: 0, dur: m === 'fps' ? (arc > 5 ? 1.0 : 0.6) : 0.55, fromPos: camera.position.clone(), fromQuat: camera.quaternion.clone(), fromFov: camera.fov, arc };
@@ -1269,7 +1245,7 @@ function pickEntity(sx, sy) {
   let best = null, bd = Infinity;
   const tol = isTouch ? 38 : 26;
   for (const e of entities) {
-    if (e.dead || !seenByPlayer(e)) continue;
+    if (e.dead) continue;
     const s = toScreen(e.x, e.isBase ? 1.6 : 0.8, e.z);
     if (s.behind) continue;
     const d = Math.hypot(s.x - sx, s.y - sy) - (e.isBase ? 45 : 0);
@@ -1354,7 +1330,7 @@ canvas.addEventListener('pointermove', e => {
 function endPointer(e) {
   const p = pointers.get(e.pointerId);
   pointers.delete(e.pointerId);
-  if (mode === 'fps') { if (e.button === 0) fps.firing = false; return; }
+  if (mode === 'fps') { if (e.pointerType === 'mouse' && e.button === 0) fps.firing = false; return; } // a lifted look finger must not stop the FIRE button
   if (!p || mode !== 'rts') return;
   if (gesture) { if (pointers.size === 0) gesture = null; return; }
   if (e.type === 'pointercancel') { boxSel = null; return; }
@@ -1384,16 +1360,13 @@ function handleTap(sx, sy, { secondary, shift, ctrl, touch }) {
   const ent = pickEntity(sx, sy);
   const gp = groundPoint(sx, sy);
   const sel = liveSelection();
-  if (armed && !secondary) {
-    if (armed === 'amove') {
-      armed = null; updateButtons();
-      if (ent && ent.team === ENEMY) commandAttack(sel, ent);
-      else if (gp) commandMove(sel, gp.x, gp.z, 'amove');
-    } else if (gp && firePower(armed, gp)) { armed = null; updateButtons(); }
+  if (amoveArmed && !secondary) {
+    amoveArmed = false; updateButtons();
+    if (ent && ent.team === ENEMY) commandAttack(sel, ent);
+    else if (gp) commandMove(sel, gp.x, gp.z, 'amove');
     return;
   }
   if (secondary) {
-    if (armed) { armed = null; updateButtons(); return; }
     if (ent && ent.team === ENEMY) commandAttack(sel, ent);
     else if (gp) commandMove(sel, gp.x, gp.z, ctrl ? 'amove' : 'move');
     return;
@@ -1423,17 +1396,15 @@ window.addEventListener('keydown', e => {
     if (e.code === 'KeyF') possessFromSelection();
     else if (e.code === 'KeyQ') selectAll();
     else if (e.code === 'KeyX') toggleAMove();
-    else if (e.code === 'Digit1') armPower('arty');
-    else if (e.code === 'Digit2') armPower('cover');
-    else if (e.code === 'Digit3') armPower('reinf');
-    else if (e.code === 'Escape') { armed = null; selection = []; updateButtons(); }
+    else if (e.code === 'Digit1') buy('trooper');
+    else if (e.code === 'Digit2') buy('heavy');
+    else if (e.code === 'Digit3') buy('sniper');
+    else if (e.code === 'Escape') { amoveArmed = false; selection = []; updateButtons(); }
   } else if (mode === 'fps') {
     if (e.code === 'KeyF' || e.code === 'Tab') exitFPS();
     else if (e.code === 'KeyR') rally();
     else if (e.code === 'KeyE') swapUnit();
     else if (e.code === 'KeyQ') useAbility();
-    else if (e.code === 'KeyT') markAim();
-    else if (e.code === 'KeyG') startPlant();
     else if (e.code === 'Space') fps.firing = true;
   }
 });
@@ -1473,23 +1444,48 @@ function stickUpdate(e) {
   knob.style.transform = `translate(${dx}px, ${dy}px)`;
   fps.stickX = dx / max; fps.stickY = dy / max;
 }
-stick.addEventListener('pointerdown', e => { e.preventDefault(); stickId = e.pointerId; try { stick.setPointerCapture(e.pointerId); } catch { /* ignore */ } stickUpdate(e); });
+stick.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (stickId !== null) return; stickId = e.pointerId; try { stick.setPointerCapture(e.pointerId); } catch { /* ignore */ } stickUpdate(e); });
 stick.addEventListener('pointermove', e => { if (e.pointerId === stickId) stickUpdate(e); });
 const stickEnd = e => { if (e.pointerId !== stickId) return; stickId = null; fps.stickX = fps.stickY = 0; knob.style.transform = ''; };
 stick.addEventListener('pointerup', stickEnd);
 stick.addEventListener('pointercancel', stickEnd);
 
+// FIRE button: its own finger, and it doubles as an aim pad (deltas computed by hand:
+// mobile Safari reports no movementX for touch)
 const btnFire = $('btnFire');
-btnFire.addEventListener('pointerdown', e => { e.preventDefault(); try { btnFire.setPointerCapture(e.pointerId); } catch { /* ignore */ } fps.firing = true; });
-btnFire.addEventListener('pointerup', () => { fps.firing = false; });
-btnFire.addEventListener('pointercancel', () => { fps.firing = false; });
-btnFire.addEventListener('pointermove', e => { // fire button doubles as an aim pad
-  if (!fps.firing || !e.buttons) return;
-  fps.yaw -= e.movementX * 0.005 * lookSens();
-  fps.pitch = Math.max(-1.3, Math.min(1.3, fps.pitch - e.movementY * 0.005 * lookSens()));
+let fireId = null, fireX = 0, fireY = 0;
+btnFire.addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation();
+  fireId = e.pointerId; fireX = e.clientX; fireY = e.clientY;
+  try { btnFire.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  fps.firing = true;
 });
+btnFire.addEventListener('pointermove', e => {
+  if (e.pointerId !== fireId) return;
+  const dx = e.clientX - fireX, dy = e.clientY - fireY;
+  fireX = e.clientX; fireY = e.clientY;
+  fps.yaw -= dx * 0.005 * lookSens();
+  fps.pitch = Math.max(-1.3, Math.min(1.3, fps.pitch - dy * 0.005 * lookSens()));
+});
+const fireEnd = e => { if (e.pointerId !== fireId) return; fireId = null; fps.firing = false; };
+btnFire.addEventListener('pointerup', fireEnd);
+btnFire.addEventListener('pointercancel', fireEnd);
 
-function tapButton(el, fn) { el.addEventListener('click', e => { e.preventDefault(); fn(); }); }
+// Touch browsers turn a second finger into pinch-zoom or swallow it as a double-tap,
+// which cancels the first finger. Block native gestures everywhere except the menus,
+// and fire buttons on pointerdown (click is suppressed once touchstart is cancelled).
+const nativeOk = t => t.closest && t.closest('.screen');
+for (const ev of ['touchstart', 'touchmove']) {
+  document.addEventListener(ev, e => { if (!nativeOk(e.target)) e.preventDefault(); }, { passive: false });
+}
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+
+function tapButton(el, fn) {
+  // touch: act on pointerdown so it works while other fingers are busy; mouse/keyboard: click
+  el.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') { e.preventDefault(); e.stopPropagation(); el._touched = performance.now(); fn(); } });
+  el.addEventListener('click', e => { e.preventDefault(); if (performance.now() - (el._touched || 0) > 600) fn(); });
+}
 tapButton($('btnAll'), selectAll);
 tapButton($('btnAMove'), toggleAMove);
 tapButton($('btnPossess'), possessFromSelection);
@@ -1497,11 +1493,9 @@ tapButton($('btnExit'), exitFPS);
 tapButton($('btnSwap'), swapUnit);
 tapButton($('btnRally'), rally);
 tapButton($('btnAbility'), useAbility);
-tapButton($('btnMark'), markAim);
-tapButton($('btnPlant'), startPlant);
-tapButton($('btnArty'), () => armPower('arty'));
-tapButton($('btnCover'), () => armPower('cover'));
-tapButton($('btnReinf'), () => armPower('reinf'));
+tapButton($('btnBuyTrooper'), () => buy('trooper'));
+tapButton($('btnBuyHeavy'), () => buy('heavy'));
+tapButton($('btnBuySniper'), () => buy('sniper'));
 tapButton($('btnStart'), startGame);
 tapButton($('btnRestart'), () => location.reload());
 
@@ -1512,26 +1506,21 @@ function selectAll() {
 }
 function toggleAMove() {
   if (!liveSelection().length) { toast('Select units first', 1); return; }
-  armed = armed === 'amove' ? null : 'amove'; updateButtons();
-  if (armed) toast(isTouch ? 'Tap a destination' : 'Click a destination', 1);
+  amoveArmed = !amoveArmed; updateButtons();
+  if (amoveArmed) toast(isTouch ? 'Tap a destination' : 'Click a destination', 1);
 }
 function possessFromSelection() {
   const sel = liveSelection();
   if (sel.length) { possess(sel[0]); return; }
-  const mine = playerUnits();
-  if (!mine.length) { toast('No units left', 1); return; }
-  mine.sort((a, b) => Math.hypot(a.x - rts.focus.x, a.z - rts.focus.z) - Math.hypot(b.x - rts.focus.x, b.z - rts.focus.z));
-  possess(mine[0]);
+  dropInNear(rts.focus.x, rts.focus.z);
 }
 function updateButtons() {
   selection = selection.filter(u => !u.dead);
   const sel = liveSelection();
   const counts = {};
   for (const u of sel) counts[u.type] = (counts[u.type] || 0) + 1;
-  $('selInfo').textContent = sel.length ? `${sel.length} selected · ${Object.entries(counts).map(([t, n]) => `${n} ${t}`).join(', ')}` : 'No units selected';
-  $('btnAMove').classList.toggle('armed', armed === 'amove');
-  $('btnArty').classList.toggle('armed', armed === 'arty');
-  $('btnCover').classList.toggle('armed', armed === 'cover');
+  $('selInfo').textContent = sel.length ? `${sel.length} selected · ${Object.entries(counts).map(([t, n]) => `${n} ${NAMES[PLAYER][t].toLowerCase()}`).join(', ')}` : 'No birds selected';
+  $('btnAMove').classList.toggle('armed', amoveArmed);
 }
 
 let toastTimer = 0;
@@ -1544,12 +1533,12 @@ function startGame() {
   if (audio && audio.resume) audio.resume();
   $('menu').classList.add('hidden');
   setMode('rts');
-  rts.focus.set(0, 0, 14);
-  rts.zoom = camera.aspect < 1 ? 40 : 26; // portrait phones need a wider view
+  rts.focus.set(0, 0, 10);
+  rts.zoom = camera.aspect < 1 ? 42 : 30; // portrait phones need a wider view
   selection = playerUnits();
   updateButtons();
-  toast(isTouch ? 'Double-tap a soldier to take control' : 'Double-click a soldier (or press F) to take control', 3);
-  setTimeout(() => radio('Enemy post is shielded. Possess a soldier and plant a charge on it.', 'warn'), 1500);
+  toast(isTouch ? 'Double-tap a duck to become it' : 'Double-click a duck (or press F) to become it', 3);
+  setTimeout(() => radio('Only YOU can claim a nest: drop into a duck and sit on nest B', 'good', { dropAt: points[1] }), 1200);
 }
 
 function endGame(won) {
@@ -1557,9 +1546,9 @@ function endGame(won) {
   if (document.pointerLockElement) document.exitPointerLock();
   if (possessed) { possessed.possessed = false; possessed.mesh.visible = true; possessed = null; }
   setMode('over');
-  document.body.classList.remove('fps', 'scoped', 'canplant', 'planting');
-  $('overTitle').textContent = won ? 'Victory' : 'Defeat';
-  $('overText').textContent = won ? `Enemy command post destroyed after ${waveNum} waves.` : `Your command post fell during wave ${waveNum}.`;
+  document.body.classList.remove('fps', 'scoped');
+  $('overTitle').textContent = won ? 'Egg-cellent victory!' : 'Fried.';
+  $('overText').textContent = won ? `The hen coop is flattened after ${waveNum} waves. All the eggs are yours.` : `The hens took your barn during wave ${waveNum}.`;
   setTimeout(() => $('over').classList.remove('hidden'), 900);
 }
 
@@ -1576,11 +1565,29 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+const hex = c => '#' + c.toString(16).padStart(6, '0');
 function drawOverlay() {
   octx.clearRect(0, 0, innerWidth, innerHeight);
   if (mode === 'menu') return;
+  // point labels
+  octx.textAlign = 'center';
+  for (const p of points) {
+    const s = toScreen(p.x, 3.9, p.z);
+    if (s.behind) continue;
+    if (mode === 'fps' && Math.hypot(p.x - camera.position.x, p.z - camera.position.z) > 60) continue;
+    octx.font = '800 16px system-ui';
+    octx.lineWidth = 4; octx.strokeStyle = 'rgba(0,0,0,.7)';
+    octx.strokeText(p.name, s.x, s.y);
+    octx.fillStyle = hex(pointColor(p));
+    octx.fillText(p.name, s.x, s.y);
+    if (p.contested || p.capturing) {
+      octx.font = '700 11px system-ui';
+      const txt = p.contested ? 'CONTESTED' : 'CAPTURING';
+      octx.strokeText(txt, s.x, s.y + 14); octx.fillStyle = '#fff'; octx.fillText(txt, s.x, s.y + 14);
+    }
+  }
   for (const e of entities) {
-    if (e.dead || e.possessed || !e.mesh.visible) continue;
+    if (e.dead || e.possessed) continue;
     const selected = selection.includes(e);
     if (!(selected || e.hp < e.maxHp || e.isBase || e.elite)) continue;
     const s = toScreen(e.x, e.isBase ? 5.8 : e.elite ? 2.8 : 2.0, e.z);
@@ -1594,8 +1601,8 @@ function drawOverlay() {
     octx.fillRect(s.x - w / 2, s.y, w * k, h);
     if (e.isBase && e.shield) {
       octx.strokeStyle = '#ffa080'; octx.lineWidth = 2; octx.strokeRect(s.x - w / 2 - 3, s.y - 3, w + 6, h + 6);
-      octx.fillStyle = '#ffd0c0'; octx.font = '700 11px system-ui'; octx.textAlign = 'center';
-      octx.fillText('SHIELDED', s.x, s.y - 6);
+      octx.fillStyle = '#ffd0c0'; octx.font = '700 11px system-ui';
+      octx.fillText(`EGGSHELL · hold ${points.length - playerPointCount()} more nest${points.length - playerPointCount() === 1 ? '' : 's'}`, s.x, s.y - 6);
     }
     if (e.armorT > 0) { octx.fillStyle = '#7fb8ff'; octx.fillRect(s.x - w / 2, s.y + h + 1, w, 2); }
   }
@@ -1618,27 +1625,24 @@ function drawOverlay() {
 function drawMinimap() {
   const W = minimap.width, s = W / N;
   const X = x => (x + HALF) * s;
-  mctx.fillStyle = '#0a0e13'; mctx.fillRect(0, 0, W, W);
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const c = j * N + i;
-    if (fogVisible[c]) mctx.fillStyle = '#1f2a37';
-    else if (fogExplored[c]) mctx.fillStyle = '#141b24';
-    else continue;
-    mctx.fillRect(i * s, j * s, s + 0.5, s + 0.5);
-  }
+  mctx.fillStyle = '#0d131a'; mctx.fillRect(0, 0, W, W);
   mctx.fillStyle = '#4b5666';
   for (const b of boxes) if (!b.owner) mctx.fillRect(X(b.minX), X(b.minZ), (b.maxX - b.minX) * s, (b.maxZ - b.minZ) * s);
-  mctx.fillStyle = '#46e08a';
-  for (const d of downed) mctx.fillRect(X(d.x) - 1.5, X(d.z) - 1.5, 3, 3);
+  mctx.lineWidth = 2;
+  for (const p of points) {
+    mctx.strokeStyle = hex(pointColor(p));
+    mctx.beginPath(); mctx.arc(X(p.x), X(p.z), POINT_R * s, 0, Math.PI * 2); mctx.stroke();
+  }
+  mctx.lineWidth = 1;
   for (const e of entities) {
-    if (e.dead || !seenByPlayer(e)) continue;
+    if (e.dead) continue;
     mctx.fillStyle = e.elite ? '#ffc340' : e.team === PLAYER ? (selection.includes(e) ? '#9dffc4' : '#3fa9ff') : '#ff5a3c';
     if (e.isBase) {
       mctx.fillRect(X(e.x) - 6, X(e.z) - 6, 12, 12);
       if (e.shield) { mctx.strokeStyle = '#ffa080'; mctx.beginPath(); mctx.arc(X(e.x), X(e.z), 10, 0, Math.PI * 2); mctx.stroke(); }
     } else { const r = e.possessed || e.elite ? 4 : 2.2; mctx.beginPath(); mctx.arc(X(e.x), X(e.z), r, 0, Math.PI * 2); mctx.fill(); }
   }
-  mctx.strokeStyle = 'rgba(255,255,255,.7)'; mctx.lineWidth = 1;
+  mctx.strokeStyle = 'rgba(255,255,255,.7)';
   if (mode === 'fps' && possessed) {
     const x = X(possessed.x), z = X(possessed.z), a = fps.yaw;
     mctx.beginPath();
@@ -1654,18 +1658,17 @@ function drawMinimap() {
 function updateHud(dt) {
   const pb = Math.max(0, Math.round(playerBase.hp / playerBase.maxHp * 100));
   const eb = Math.max(0, Math.round(enemyBase.hp / enemyBase.maxHp * 100));
-  const shield = enemyBase.shield ? 'shielded' : `shield down ${Math.ceil(enemyBase.shieldT)}s`;
-  $('status').textContent = `Base ${pb}% · Enemy post ${eb}% (${shield}) · Army ${countUnits(PLAYER)} vs ${countUnits(ENEMY)} · Wave ${waveNum + 1} in ${Math.ceil(waveTimer)}s`;
-  $('odFill').style.width = `${game.od}%`;
-  $('odText').textContent = game.linkCd > 0 ? `RELINK ${Math.ceil(game.linkCd)}s` : `OVERDRIVE ${Math.floor(game.od)}%`;
-  $('odFill').parentElement.classList.toggle('low', mode !== 'fps' && (game.od < OD_MIN || game.linkCd > 0));
-  $('cpText').textContent = `CP ${Math.floor(game.cp)}`;
-  for (const [id, p] of [['btnArty', 'arty'], ['btnCover', 'cover'], ['btnReinf', 'reinf']]) $(id).classList.toggle('off', game.cp < POWERS[p]);
-  $('btnPossess').classList.toggle('off', game.od < OD_MIN || game.linkCd > 0);
+  const dots = points.map(p => `${p.name}${p.owner === PLAYER ? '🦆' : p.owner === ENEMY ? '🐔' : '🥚'}`).join(' ');
+  $('status').textContent = `Nests ${dots} · Barn ${pb}% · Coop ${eb}%${enemyBase.shield ? ' (shelled)' : ' (CRACKED!)'} · Hens in ${Math.ceil(waveTimer)}s`;
+  const income = CP_BASE + CP_PER_POINT * playerPointCount();
+  $('cpText').textContent = `🌽 ${Math.floor(game.cp)}  (+${income.toFixed(1)}/s)`;
+  for (const [id, t] of [['btnBuyTrooper', 'trooper'], ['btnBuyHeavy', 'heavy'], ['btnBuySniper', 'sniper']]) $(id).classList.toggle('off', game.cp < COSTS[t]);
+  $('btnPossess').textContent = game.relink > 0 ? `Drop in (${Math.ceil(game.relink)}s)` : 'Drop in ▶';
+  $('btnPossess').classList.toggle('off', game.relink > 0);
   if (possessed) {
     const k = Math.max(0, possessed.hp / possessed.maxHp);
     $('fpsHpFill').style.width = `${k * 100}%`;
-    $('fpsHpText').textContent = `${possessed.type.toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  x${POSSESS_DMG} damage`;
+    $('fpsHpText').textContent = `${nameOf(possessed).toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  x${POSSESS_DMG} damage`;
     const t = TYPES[possessed.type];
     const ab = $('btnAbility');
     ab.textContent = possessed.type === 'sniper' ? (fps.scoped ? 'Unscope (Q)' : 'Scope (Q)') : possessed.abilityCd > 0 ? `${t.ability} ${Math.ceil(possessed.abilityCd)}s` : `${t.ability} (Q)`;
@@ -1687,26 +1690,23 @@ function frame(now) {
     const scale = game.slowmo > 0.5 ? 0.25 : game.slowmo > 0 ? 1 - 1.5 * game.slowmo : 1;
     const simDt = dt * scale;
     game.time += simDt;
-    game.cp = Math.min(CP_MAX, game.cp + CP_RATE * simDt);
-    if (game.linkCd > 0) game.linkCd -= simDt;
-    if (mode === 'rts') game.od = Math.min(100, game.od + OD_FILL * simDt);
+    game.cp = Math.min(CP_MAX, game.cp + (CP_BASE + CP_PER_POINT * playerPointCount()) * simDt);
+    if (game.relink > 0) game.relink -= simDt;
     if (mode === 'fps') updateFPS(dt, simDt);
     for (const e of entities) if (!e.dead && !e.isBase) updateUnit(e, simDt);
     separate();
+    updatePoints(simDt);
     updateEnemyOrders(simDt);
     updateBases(simDt);
-    updateProjectiles(simDt);
-    updateDowned(simDt);
+    updateGrenades(simDt);
     entities = entities.filter(e => !e.dead);
     selection = selection.filter(e => !e.dead);
-    fogTimer -= dt;
-    if (fogTimer <= 0) { fogTimer = 0.12; updateFog(); }
   }
   for (const e of entities) {
     if (e.isBase) { e.bodyMat.emissive.setHex(e.flash > 0 ? 0x552211 : 0); e.flash -= dt; continue; }
     e.mesh.position.set(e.x, e.moving ? Math.abs(Math.sin(now / 90)) * 0.05 : 0, e.z);
     e.mesh.rotation.y = e.facing;
-    e.mesh.visible = !e.possessed && (mode === 'fps' || mode === 'menu' || seenByPlayer(e));
+    e.mesh.visible = !e.possessed;
     e.ring.visible = selection.includes(e) && mode !== 'fps';
     if (!e.elite) {
       e.bodyMat.emissive.setHex(e.flash > 0 ? 0xffffff : e.armorT > 0 ? 0x2266ff : 0);
@@ -1714,11 +1714,7 @@ function frame(now) {
     }
     e.flash -= dt;
   }
-  if (markTarget && !markTarget.dead && markTarget.mesh.visible) {
-    markMesh.visible = true;
-    markMesh.position.set(markTarget.x, (markTarget.isBase ? 6.6 : markTarget.elite ? 3.4 : 2.7) + Math.sin(now / 200) * 0.15, markTarget.z);
-    markMesh.rotation.set(Math.PI, now / 300, 0);
-  } else markMesh.visible = false;
+  for (const p of points) p.flag.rotation.y = Math.sin(now / 500 + p.x) * 0.3;
   fps.hitMarker -= dt;
   fps.hurt = Math.max(0, fps.hurt - dt);
   updateEffects(dt);
@@ -1734,6 +1730,7 @@ requestAnimationFrame(frame);
 // debug hook for automated smoke tests
 window.__game = {
   get mode() { return mode; }, get entities() { return entities; }, get selection() { return selection; },
-  get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, get downed() { return downed; },
-  setEliteTimer: t => { eliteTimer = t; }, damage, fogMesh, game, fps, possess, exitFPS, startGame, commandMove, armPower, firePower, useAbility, markAim, startPlant, updateFog,
+  get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
+  game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
+  setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
 };

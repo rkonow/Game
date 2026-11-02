@@ -13,7 +13,7 @@ canvas#overlay { position: fixed; inset: 0; width: 100%; height: 100%; pointer-e
 button {
   font: inherit; font-weight: 600; color: #e8eef6; background: rgba(30, 40, 54, .88);
   border: 1px solid rgba(140, 170, 210, .35); border-radius: 10px; padding: 10px 14px; min-height: 44px;
-  cursor: pointer; touch-action: manipulation;
+  cursor: pointer; touch-action: none;
 }
 button:active { transform: translateY(1px); background: rgba(50, 64, 84, .95); }
 button.accent { background: #2f7fd6; border-color: #63a8f0; }
@@ -121,13 +121,6 @@ body.touch .touch-only { display: block; }
 #meters {
   position: absolute; top: calc(30px + env(safe-area-inset-top)); left: 12px; display: flex; gap: 10px; align-items: center;
 }
-.meter {
-  position: relative; width: 170px; height: 16px; background: rgba(0,0,0,.6); border-radius: 8px; overflow: hidden;
-  border: 1px solid rgba(127,184,255,.5);
-}
-#odFill { height: 100%; width: 0; background: linear-gradient(90deg, #2f7fd6, #7fe0ff); transition: width .15s; }
-.meter.low #odFill { background: #5a6676; }
-#odText { position: absolute; inset: 0; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-align: center; line-height: 14px; }
 #cpText { font-weight: 800; color: #ffd36a; text-shadow: 0 1px 3px #000; }
 
 #powers {
@@ -155,18 +148,6 @@ body.fps #powers { display: none; }
 body.desktop #fpsActions { bottom: calc(44px + env(safe-area-inset-bottom)); }
 #fpsActions button { min-width: 104px; }
 #fpsActions button.cd { opacity: .45; }
-#btnPlant {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(48px + env(safe-area-inset-bottom));
-  display: none; background: #c4492e; border-color: #ff8a6a;
-}
-body.canplant #btnPlant { display: block; }
-#plantBar {
-  position: absolute; left: 50%; top: 60%; transform: translateX(-50%); width: 220px; height: 20px; display: none;
-  background: rgba(0,0,0,.7); border-radius: 10px; overflow: hidden; border: 1px solid #ff8a6a;
-}
-#plantBar span { position: absolute; inset: 0; text-align: center; font-size: 12px; font-weight: 700; line-height: 18px; }
-#plantFill { height: 100%; width: 0; background: #c4492e; }
-body.planting #plantBar { display: block; }
 #scope {
   position: absolute; inset: 0; display: none;
   background: radial-gradient(circle at center, rgba(0,0,0,0) 32vmin, rgba(0,0,0,.92) 33vmin);
@@ -178,10 +159,38 @@ body.scoped #crosshair { width: 60vmin; height: 60vmin; margin: -30vmin 0 0 -30v
 
 @media (max-width: 600px) {
   #meters { top: calc(44px + env(safe-area-inset-top)); }
-  .meter { width: 120px; }
   #fpsTop { top: calc(72px + env(safe-area-inset-top)); }
   #radio { top: calc(128px + env(safe-area-inset-top)); left: auto; right: 8px; transform: none; align-items: flex-end; max-width: calc(100vw - 150px); }
   #radio div { white-space: normal; }
   #powers { top: 42%; }
   #powers button { min-width: 84px; font-size: 12px; }
+}
+
+/* ---- v3: mode tag, shop, drop-in alerts ---- */
+#modeTag { background: rgba(47,127,214,.85); padding: 2px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+#modeTag.op { background: rgba(196,73,46,.85); }
+#modeTag b { letter-spacing: .08em; margin-right: 6px; }
+#radio div { display: flex; align-items: center; gap: 8px; }
+#radio button { min-height: 28px; padding: 2px 10px; font-size: 12px; background: #2f7fd6; border-color: #63a8f0; border-radius: 6px; }
+#btnPossess.off { opacity: .5; }
+@media (max-width: 600px) { #modeTag { font-size: 11px; } }
+.screen button { touch-action: manipulation; }
+
+/* ---- farmyard theme ---- */
+.screen { background: rgba(40, 70, 30, .55); }
+.card { background: #fff8e6; color: #3b2a1a; border: 4px solid #c8402c; box-shadow: 0 10px 0 #8a2a1c, 0 20px 40px rgba(0,0,0,.3); border-radius: 22px; }
+.card h1 { font-size: 40px; color: #c8402c; text-shadow: 0 3px 0 #ffd84a; }
+.card .sub { margin: -4px 0 12px; font-weight: 800; color: #5c9e3c; letter-spacing: .05em; }
+.card .lead, .cols ul, .roles { color: #5a4630; }
+.cols h3 { color: #2f7fd6; }
+button.big { background: #ffd84a; color: #3b2a1a; border: 3px solid #c8902c; box-shadow: 0 5px 0 #c8902c; font-weight: 900; border-radius: 16px; }
+#status, #cpText { color: #fff; text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,.6); }
+#cpText { color: #ffe66a; }
+#powers button { background: rgba(255, 248, 230, .92); color: #3b2a1a; border: 2px solid #c8902c; }
+#powers small { color: #a8701c; }
+#crosshair { border-color: rgba(255, 240, 122, .85); }
+@media (max-width: 600px) {
+  .cols li.desk { display: none; }
+  .card { padding: 16px; }
+  .card h1 { font-size: 30px; }
 }
