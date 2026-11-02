@@ -57,7 +57,9 @@ renderer.toneMappingExposure = 1.12;
 // physically based materials everywhere (the helper keeps its old name so the rest of the code stays put)
 function toon(p = {}) {
   const { gradientMap, ...rest } = p; // eslint-disable-line no-unused-vars
-  return new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.15, ...rest });
+  const m = new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.15, ...rest });
+  m.metalness = Math.min(m.metalness, 0.65); // fully metallic faces turn black wherever they don't mirror the bright sky
+  return m;
 }
 function outline() { return null; } // the cartoon ink outlines are gone in the realistic look
 
@@ -78,7 +80,7 @@ const skyMat = new THREE.ShaderMaterial({
       vec3 top = vec3(0.07, 0.08, 0.20), mid = vec3(0.42, 0.30, 0.42), hor = vec3(1.05, 0.62, 0.38), ground = vec3(0.30, 0.18, 0.12);
       vec3 c = mix(hor, mid, smoothstep(0.0, 0.22, h));
       c = mix(c, top, smoothstep(0.22, 0.85, h));
-      c = mix(c, ground, smoothstep(0.0, -0.15, h));
+      c = mix(c, ground, (1.0 - smoothstep(-0.15, 0.0, h)));
       float s = max(dot(d, sunDir), 0.0);
       c += vec3(1.0, 0.75, 0.45) * (pow(s, 900.0) * 18.0 + pow(s, 40.0) * 0.6 + pow(s, 6.0) * 0.18);
       // faint stars high up
@@ -102,7 +104,7 @@ scene.add(camera);
   envScene.add(new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), skyMat));
   const pm = new THREE.PMREMGenerator(renderer);
   scene.environment = pm.fromScene(envScene, 0.02).texture;
-  scene.environmentIntensity = 0.55;
+  scene.environmentIntensity = 0.8;
   pm.dispose();
 }
 scene.add(new THREE.HemisphereLight(0x8f86b8, 0x5a3a28, 0.55));
@@ -141,7 +143,7 @@ const gradePass = new ShaderPass({
       c *= mix(vec3(0.97, 0.99, 1.05), vec3(1.05, 1.0, 0.93), smoothstep(0.2, 0.8, l)); // cool shadows, warm highlights
       c = (c - 0.5) * 1.05 + 0.5;
       vec2 d = vUv - 0.5; d.x *= uAspect;
-      float v = smoothstep(0.95, 0.3, length(d));
+      float v = (1.0 - smoothstep(0.3, 0.95, length(d)));
       c *= mix(1.0 - uVig, 1.0, v);
       c = mix(c, vec3(0.9, 0.1, 0.05), (1.0 - v) * uHurt * 0.6);
       gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
@@ -473,7 +475,7 @@ const containerTex = (() => { // corrugated container walls
 })();
 const containerColors = [0x2f6f9a, 0xa8432c, 0x5a7a3a, 0xc08a2a];
 const hayMat = toon({ map: plateTex.col, normalMap: plateTex.nrm, roughness: 0.5, metalness: 0.7, color: 0x8a8f96 }); // crate metal (name kept for towers)
-const hayTopMat = toon({ color: 0x3a3e44, roughness: 0.6, metalness: 0.6 });
+const hayTopMat = toon({ color: 0x555a62, roughness: 0.6, metalness: 0.6 });
 const plankMat = toon({ color: 0x8c8a86, roughness: 0.9, metalness: 0.05, normalMap: rockTex.nrm }); // concrete
 const barnRedMat = toon({ map: plateTex.col, normalMap: plateTex.nrm, roughness: 0.55, metalness: 0.6, color: 0xb8bcc4 });
 OBSTACLE_DEFS.forEach(([x, z, w, d, h], idx) => {
@@ -550,7 +552,7 @@ const playerPointCount = () => points.filter(p => p.owner === PLAYER).length;
 // ---------------------------------------------------------------- entities: marines vs the swarm
 let entities = [];
 const teamMats = TEAM_COLORS.map(c => toon({ color: c, roughness: 0.45, metalness: 0.4 }));
-const darkMat = toon({ color: 0x1e2228, roughness: 0.35, metalness: 0.85 });   // gunmetal
+const darkMat = toon({ color: 0x353b44, roughness: 0.4, metalness: 0.55 });   // gunmetal
 const goldMat = toon({ color: 0x5a2a7a, emissive: 0x6a1aa0, emissiveIntensity: 0.6, roughness: 0.25, metalness: 0.3 }); // tyrant carapace
 const visorMat = new THREE.MeshStandardMaterial({ color: 0x0a1a24, emissive: 0x38c8ff, emissiveIntensity: 1.8, roughness: 0.1, metalness: 0.6 });
 const orangeMat = toon({ color: 0xff8a1f, roughness: 0.5 });
@@ -749,7 +751,7 @@ function makeBase(team, x, z) {
         vertexShader: 'varying vec3 vN; varying vec3 vV; varying vec3 vP; void main(){ vP = position; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
         fragmentShader: `uniform float opacity; uniform float uTime; varying vec3 vN; varying vec3 vV; varying vec3 vP;
           void main(){
-            float f = pow(1.0 - abs(dot(vN, vV)), 2.5);
+            float f = pow(clamp(1.0 - abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0), 2.5);
             vec2 q = vec2(atan(vP.z, vP.x) * 6.0, vP.y * 3.0); vec2 h = abs(fract(q) - 0.5);
             float hex = smoothstep(0.42, 0.5, max(h.x, h.y));
             float pulse = 0.6 + 0.4 * sin(vP.y * 2.0 - uTime * 2.0);
@@ -1760,35 +1762,119 @@ function updateGrenades(dt) {
 
 // ---------------------------------------------------------------- FPS control
 const viewmodel = new THREE.Group();
+// first-person weapons: one model per kit, built from simple parts but with real gun anatomy
+// (receiver, rail, handguard, barrel, muzzle brake, magazine, stock, optic) and an armoured glove + sleeve holding it
 {
-  const gunMat = toon({ color: 0x2a2f36, roughness: 0.35, metalness: 0.85 });
-  const gun = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.5, 10), gunMat);
-  gun.rotation.x = Math.PI / 2;
-  gun.position.z = -0.27;
-  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.025, 0.06), visorMat);
-  sight.position.set(0, 0.07, -0.18);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.14), gunMat); // magazine
-  grip.position.set(0, 0.07, -0.05); viewmodel.add(grip);
-  const wing = new THREE.Mesh(sphere, toon({ color: 0x6d7a68, roughness: 0.5, metalness: 0.5 })); // your armoured glove
-  wing.scale.set(0.05, 0.045, 0.14); wing.position.set(0.03, -0.07, 0.0); wing.rotation.x = 0.3;
-  viewmodel.userData.wing = wing;
-  viewmodel.add(gun, sight, wing);
-  const muzzle = new THREE.Object3D(); muzzle.position.z = -0.58; viewmodel.add(muzzle);
+  const metal = toon({ color: 0x4a515b, roughness: 0.32, metalness: 0.6 });
+  const poly = toon({ color: 0x2c3036, roughness: 0.62, metalness: 0.1 });       // polymer furniture
+  const paint = toon({ color: 0x7d7a62, roughness: 0.55, metalness: 0.25 });     // olive panels
+  const edge = toon({ color: 0x8c949e, roughness: 0.28, metalness: 0.65 });      // worn bright edges
+  const glow = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.35, 1.6, 2.6) }); // energy strip and coils
+  const lens = new THREE.MeshStandardMaterial({ color: 0x0b1820, emissive: 0xff4a3a, emissiveIntensity: 0.6, roughness: 0.05, metalness: 0.4 });
+  const sleeve = toon({ color: 0x6b7a66, roughness: 0.5, metalness: 0.45 });     // tinted to the marine's armour on possess
+  const glove = toon({ color: 0x23262b, roughness: 0.75, metalness: 0.05 });
+  const box = (g, mat, w, h, d, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
+  const tube = (g, mat, r1, r2, len, x, y, z, seg = 12) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, len, seg), mat); m.rotation.x = Math.PI / 2; m.position.set(x, y, z); g.add(m); return m; };
+  const ring = (g, mat, r, t, x, y, z) => { const m = new THREE.Mesh(new THREE.TorusGeometry(r, t, 6, 18), mat); m.position.set(x, y, z); g.add(m); return m; };
+  const hands = (g, gripZ, foreZ, foreY) => {
+    box(g, glove, 0.07, 0.075, 0.085, 0.004, -0.085, gripZ + 0.01);                       // right hand on the grip
+    box(g, glove, 0.02, 0.03, 0.06, -0.03, -0.045, gripZ - 0.035);                         // trigger finger
+    const s1 = tube(g, sleeve, 0.05, 0.058, 0.32, 0.03, -0.14, gripZ + 0.2, 10); s1.rotation.x = Math.PI / 2 - 0.55; // forearm armour
+    ring(g, edge, 0.052, 0.008, 0.02, -0.11, gripZ + 0.1).rotation.x = Math.PI / 2 - 0.55;
+    box(g, glove, 0.075, 0.06, 0.1, -0.012, foreY - 0.045, foreZ);                         // left hand under the handguard
+    const s2 = tube(g, sleeve, 0.048, 0.056, 0.36, -0.13, foreY - 0.13, foreZ + 0.12, 10); s2.rotation.set(Math.PI / 2 - 0.6, 0, -0.75);
+  };
+  const strip = (g, len, z, y = 0.01) => { box(g, glow, 0.004, 0.01, len, 0.043, y, z); box(g, glow, 0.004, 0.01, len, -0.043, y, z); };
+  const kits = {};
+  { // Marine: compact pulse rifle with a red-dot sight
+    const g = new THREE.Group();
+    box(g, metal, 0.08, 0.1, 0.34, 0, 0, -0.12);                 // receiver
+    box(g, paint, 0.084, 0.05, 0.2, 0, -0.01, -0.14);            // side panels
+    box(g, edge, 0.04, 0.012, 0.36, 0, 0.056, -0.16);            // top rail
+    for (let k = 0; k < 7; k++) box(g, metal, 0.046, 0.008, 0.012, 0, 0.066, -0.03 - k * 0.042);
+    box(g, poly, 0.074, 0.08, 0.24, 0, -0.005, -0.4);           // handguard
+    for (let k = 0; k < 4; k++) { box(g, glow, 0.078, 0.012, 0.03, 0, 0.006, -0.32 - k * 0.055); }
+    tube(g, metal, 0.016, 0.016, 0.16, 0, 0.005, -0.58);         // barrel
+    tube(g, edge, 0.026, 0.024, 0.06, 0, 0.005, -0.67, 8);       // muzzle brake
+    box(g, poly, 0.05, 0.15, 0.075, 0, -0.11, -0.2, 0.22);        // magazine
+    box(g, glow, 0.052, 0.012, 0.02, 0, -0.16, -0.215, 0.22);     // ammo counter
+    box(g, poly, 0.045, 0.1, 0.05, 0, -0.08, 0.0, -0.3);          // grip
+    box(g, poly, 0.06, 0.085, 0.16, 0, -0.01, 0.12);              // stock
+    box(g, glove, 0.065, 0.1, 0.03, 0, -0.01, 0.205);             // butt pad
+    box(g, metal, 0.05, 0.05, 0.09, 0, 0.1, -0.1);                // optic housing
+    const l = tube(g, lens, 0.02, 0.02, 0.005, 0, 0.1, -0.147, 14); l.rotation.x = Math.PI / 2;
+    strip(g, 0.2, -0.13);
+    hands(g, 0.0, -0.4, -0.005);
+    kits.trooper = { g, muzzle: -0.71 };
+  }
+  { // Juggernaut: a heavy tri-barrel plasma cannon with glowing coils and a power cell
+    const g = new THREE.Group();
+    box(g, metal, 0.13, 0.13, 0.42, 0, 0, -0.16);
+    box(g, paint, 0.136, 0.07, 0.26, 0, 0.02, -0.17);
+    box(g, edge, 0.06, 0.014, 0.3, 0, 0.073, -0.16);
+    for (let k = 0; k < 3; k++) {
+      const a = k / 3 * Math.PI * 2 + Math.PI / 2;
+      tube(g, metal, 0.022, 0.022, 0.32, Math.cos(a) * 0.035, Math.sin(a) * 0.035 + 0.005, -0.5, 10);
+    }
+    for (let k = 0; k < 3; k++) ring(g, glow, 0.066, 0.009, 0, 0.005, -0.42 - k * 0.07);
+    tube(g, edge, 0.07, 0.065, 0.05, 0, 0.005, -0.66, 14);
+    const cell = tube(g, poly, 0.045, 0.045, 0.22, 0.095, -0.03, -0.12, 12);
+    ring(g, glow, 0.047, 0.006, 0.095, -0.03, -0.06); ring(g, glow, 0.047, 0.006, 0.095, -0.03, -0.18); cell.userData.cell = true;
+    box(g, poly, 0.05, 0.1, 0.06, 0, -0.1, 0.0, -0.25);
+    box(g, poly, 0.07, 0.04, 0.12, 0, -0.085, -0.26);              // fore handle
+    box(g, metal, 0.11, 0.1, 0.12, 0, -0.005, 0.1);
+    strip(g, 0.3, -0.16, 0.035);
+    hands(g, 0.0, -0.26, -0.06);
+    kits.heavy = { g, muzzle: -0.7 };
+  }
+  { // Ranger: a long rail rifle with a big scope and a folding bipod
+    const g = new THREE.Group();
+    box(g, metal, 0.064, 0.085, 0.36, 0, 0, -0.12);
+    box(g, paint, 0.068, 0.04, 0.22, 0, -0.012, -0.12);
+    box(g, poly, 0.06, 0.07, 0.26, 0, -0.005, -0.42);
+    for (let k = 0; k < 5; k++) box(g, glow, 0.064, 0.008, 0.024, 0, 0.012, -0.33 - k * 0.045);
+    tube(g, metal, 0.014, 0.017, 0.4, 0, 0.0, -0.74, 10);         // long barrel
+    tube(g, edge, 0.022, 0.022, 0.08, 0, 0.0, -0.96, 8);           // suppressor-ish brake
+    tube(g, metal, 0.03, 0.03, 0.24, 0, 0.1, -0.14, 14);           // scope tube
+    tube(g, metal, 0.04, 0.03, 0.05, 0, 0.1, -0.28, 14);           // objective bell
+    tube(g, metal, 0.036, 0.03, 0.04, 0, 0.1, -0.005, 14);         // eyepiece
+    const l = tube(g, lens, 0.034, 0.034, 0.004, 0, 0.1, -0.307, 14); lens.emissive.setHex(0xff4a3a);
+    box(g, metal, 0.02, 0.05, 0.03, 0, 0.06, -0.08); box(g, metal, 0.02, 0.05, 0.03, 0, 0.06, -0.2); // rings
+    box(g, poly, 0.04, 0.1, 0.045, 0, -0.08, 0.0, -0.3);
+    box(g, poly, 0.045, 0.1, 0.06, 0, -0.1, -0.16, 0.15);
+    const st = box(g, poly, 0.05, 0.03, 0.2, 0, 0.02, 0.15); box(g, poly, 0.05, 0.03, 0.18, 0, -0.06, 0.15, 0.25); box(g, glove, 0.055, 0.12, 0.03, 0, -0.02, 0.255);
+    box(g, edge, 0.012, 0.012, 0.16, 0.02, -0.05, -0.5); box(g, edge, 0.012, 0.012, 0.16, -0.02, -0.05, -0.5); // folded bipod
+    strip(g, 0.18, -0.12);
+    hands(g, 0.0, -0.42, -0.01);
+    kits.sniper = { g, muzzle: -1.0 };
+  }
+  for (const k in kits) { kits[k].g.visible = false; viewmodel.add(kits[k].g); }
+  viewmodel.userData.kits = kits;
+  viewmodel.userData.wing = { material: sleeve };
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.005, -0.71); viewmodel.add(muzzle);
   viewmodel.userData.muzzle = muzzle;
   const flash = new THREE.Group();
-  const flashMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 2.4, 1.1), transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const flashMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 2.6, 3.6), transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
   for (let k = 0; k < 3; k++) { // a star of crossed quads
     const q = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.07), flashMat); q.rotation.z = k * Math.PI / 3; flash.add(q);
   }
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
   flash.add(core);
-  flash.position.z = -0.62; flash.visible = false; viewmodel.add(flash);
+  flash.position.set(0, 0.005, -0.75); flash.visible = false; viewmodel.add(flash);
   viewmodel.userData.flash = flash;
+  // a soft fill light that only reaches the gun, so it never turns into a black silhouette against the sky
+  const fill = new THREE.PointLight(0xdfe8ff, 0.12, 1.2, 2); fill.position.set(-0.1, 0.25, 0.1); viewmodel.add(fill);
   viewmodel.position.set(0.22, -0.22, -0.35);
   viewmodel.scale.setScalar(0.8);
   viewmodel.visible = false;
   viewmodel.traverse(noRay);
   camera.add(viewmodel);
+}
+function setViewGun(type) {
+  const kits = viewmodel.userData.kits, kit = kits[type] || kits.trooper;
+  for (const k in kits) kits[k].g.visible = kits[k] === kit;
+  viewmodel.userData.muzzle.position.z = kit.muzzle;
+  viewmodel.userData.flash.position.z = kit.muzzle - 0.04;
 }
 
 
@@ -1809,7 +1895,8 @@ function possess(u) {
   u.mesh.visible = false;
   fps.yaw = u.facing; fps.pitch = -0.05; fps.firing = false; setScoped(false);
   fps.vx = fps.vz = fps.recoil = fps.bloom = fps.vy = 0; fps.dash = null; u.y = 0; fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
-  viewmodel.userData.wing.material.color.copy(u.bodyMat.color);
+  viewmodel.userData.wing.material.color.copy(u.bodyMat.color).multiplyScalar(0.7);
+  setViewGun(u.type);
   if (!selection.includes(u)) selection.push(u);
   game.slowmo = swap ? 0.6 : 1.3;
   setMode('fps', swap ? 3 : 9);
@@ -2221,10 +2308,10 @@ function updateCamera(dt) {
   fps.swayY += (Math.max(-0.05, Math.min(0.05, -dpitch * 0.6)) - fps.swayY) * ks;
   const walk = Math.min(1, Math.hypot(fps.vx, fps.vz) / 4);
   const portrait = camera.aspect < 1;
-  viewmodel.scale.setScalar(portrait ? 0.5 : 0.62);
+  viewmodel.scale.setScalar(portrait ? 0.42 : 0.5);
   viewmodel.position.set(
     (portrait ? 0.09 : 0.17) + fps.swayX + Math.cos(fps.bob * 0.5) * 0.012 * walk,
-    (portrait ? -0.15 : -0.17) + fps.swayY - Math.abs(Math.sin(fps.bob * 0.5)) * 0.014 * walk - fps.vmKick * 0.012,
+    (portrait ? -0.12 : -0.17) + fps.swayY - Math.abs(Math.sin(fps.bob * 0.5)) * 0.014 * walk - fps.vmKick * 0.012,
     -0.35 + fps.vmKick * 0.07);
   viewmodel.rotation.set(fps.vmKick * 0.18, fps.swayX * 1.5, -fps.swayX * 2);
   fps.flash -= dt;
@@ -3195,7 +3282,8 @@ function frame(now) {
     { const q = Math.max(0, e.flash) * 1.4, b = e.baseScale || 1; e.mesh.scale.set(b * (1 + q), b * (1 - q), b * (1 + q)); } // squash when hit
     if (e.upper && !(tac.on && tac.phase === 'plan')) animateBird(e, dt, now);
     e.mesh.rotation.y = e.facing;
-    e.mesh.visible = !e.possessed;
+    // in first person, a squadmate brushing past the camera would fill the screen with armour for a frame: hide anyone that close
+    e.mesh.visible = !e.possessed && !(mode === 'fps' && possessed && e.team === PLAYER && !e.isTower && Math.hypot(e.x - possessed.x, e.z - possessed.z) < 1.15);
     e.ring.visible = selection.includes(e) && mode !== 'fps';
     if (!e.elite) {
       e.bodyMat.emissive.setHex(e.flash > 0 ? 0xffffff : e.armorT > 0 ? 0x2266ff : 0);
