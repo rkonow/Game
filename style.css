@@ -1,0 +1,118 @@
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden; background: #10151c; color: #e8eef6;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  touch-action: none; user-select: none; -webkit-user-select: none; overscroll-behavior: none;
+}
+canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+canvas#overlay { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#hud button, #minimap, #stick { pointer-events: auto; }
+
+button {
+  font: inherit; font-weight: 600; color: #e8eef6; background: rgba(30, 40, 54, .88);
+  border: 1px solid rgba(140, 170, 210, .35); border-radius: 10px; padding: 10px 14px; min-height: 44px;
+  cursor: pointer; touch-action: manipulation;
+}
+button:active { transform: translateY(1px); background: rgba(50, 64, 84, .95); }
+button.accent { background: #2f7fd6; border-color: #63a8f0; }
+button.armed { background: #c4492e; border-color: #ff8a6a; }
+button.big { font-size: 18px; padding: 14px 34px; margin-top: 10px; }
+
+.bar { position: absolute; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#status {
+  position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 12px; right: 172px;
+  font-weight: 600; text-shadow: 0 1px 3px #000; font-size: 13px;
+}
+#minimap {
+  position: absolute; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right));
+  width: 150px; height: 150px; border: 1px solid rgba(140, 170, 210, .4); border-radius: 8px; background: #0b0f14;
+}
+#toast {
+  position: absolute; top: 34%; left: 50%; transform: translateX(-50%); font-size: 18px; font-weight: 700;
+  text-shadow: 0 2px 6px #000; opacity: 0; transition: opacity .3s; text-align: center; white-space: nowrap;
+}
+#toast.show { opacity: 1; }
+
+#rtsBar {
+  left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom));
+  justify-content: center; max-width: calc(100% - 16px);
+}
+#selInfo { background: rgba(10, 14, 20, .7); padding: 6px 10px; border-radius: 8px; font-weight: 600; }
+
+#fpsUI { position: absolute; inset: 0; display: none; }
+body.fps #fpsUI { display: block; }
+body.fps #rtsBar { display: none; }
+#crosshair {
+  position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  background:
+    linear-gradient(#fff, #fff) center/2px 8px no-repeat,
+    linear-gradient(#fff, #fff) center/8px 2px no-repeat;
+  border: 2px solid rgba(255, 255, 255, .55); border-radius: 50%;
+}
+#vignette {
+  position: absolute; inset: 0; opacity: 0; transition: opacity .25s;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(200,20,10,.65) 100%);
+}
+#fpsTop { top: calc(40px + env(safe-area-inset-top)); left: 12px; }
+#fpsHp {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom));
+  width: min(260px, 50vw); height: 18px; background: rgba(0,0,0,.6); border-radius: 9px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,.3);
+}
+#fpsHpFill { height: 100%; width: 100%; background: linear-gradient(90deg, #2fd27a, #8af0b5); }
+#fpsHpText { position: absolute; inset: 0; text-align: center; font-size: 12px; line-height: 16px; font-weight: 700; }
+#lockHint {
+  position: absolute; left: 50%; top: 58%; transform: translateX(-50%); background: rgba(0,0,0,.6);
+  padding: 6px 12px; border-radius: 8px; display: none;
+}
+body.fps.desktop.unlocked #lockHint { display: block; }
+
+.touch-only { display: none; }
+body.touch .touch-only { display: block; }
+#stick {
+  position: absolute; left: calc(24px + env(safe-area-inset-left)); bottom: calc(44px + env(safe-area-inset-bottom));
+  width: 140px; height: 140px; border-radius: 50%; background: rgba(255,255,255,.08);
+  border: 2px solid rgba(255,255,255,.25); touch-action: none;
+}
+#knob {
+  position: absolute; left: 50%; top: 50%; width: 60px; height: 60px; margin: -30px 0 0 -30px;
+  border-radius: 50%; background: rgba(255,255,255,.35); border: 2px solid rgba(255,255,255,.5);
+}
+#btnFire {
+  position: absolute; right: calc(28px + env(safe-area-inset-right)); bottom: calc(56px + env(safe-area-inset-bottom));
+  width: 104px; height: 104px; border-radius: 50%; background: rgba(196, 73, 46, .75); border-color: #ff8a6a;
+  font-size: 18px; touch-action: none;
+}
+
+.screen {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 11, 16, .82); padding: 16px; overflow: auto; touch-action: pan-y;
+}
+.screen.hidden { display: none; }
+.card {
+  max-width: 760px; width: 100%; background: #18212d; border: 1px solid #2c3a4d; border-radius: 16px;
+  padding: 22px 24px; text-align: center;
+}
+.card h1 { margin: 0 0 6px; letter-spacing: .04em; }
+.card .lead { color: #b9c7d8; margin: 0 0 14px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; text-align: left; }
+.cols h3 { margin: 6px 0; color: #7fb8ff; }
+.cols ul { margin: 0; padding-left: 18px; color: #c9d4e2; }
+.cols li { margin: 3px 0; }
+@media (max-width: 600px) {
+  .cols { grid-template-columns: 1fr; }
+  #minimap { width: 110px; height: 110px; }
+  #status { right: 128px; font-size: 12px; }
+  #rtsBar button { padding: 8px 10px; }
+}
+@media (max-width: 600px) {
+  #fpsTop { flex-direction: column; align-items: flex-start; top: calc(56px + env(safe-area-inset-top)); }
+  #fpsTop button { min-width: 120px; padding: 8px 10px; }
+}
+@media (max-width: 600px) {
+  #rtsBar { width: calc(100% - 16px); }
+  #selInfo { width: 100%; text-align: center; padding: 4px; font-size: 12px; }
+  #rtsBar button { flex: 1; min-width: 0; font-size: 13px; }
+}

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#10151c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Vanguard Shift</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+<canvas id="overlay"></canvas>
+
+<div id="hud">
+  <div id="status"></div>
+  <canvas id="minimap" width="150" height="150"></canvas>
+  <div id="toast"></div>
+
+  <!-- RTS controls -->
+  <div id="rtsBar" class="bar">
+    <span id="selInfo">No units selected</span>
+    <button id="btnAll" title="Select all army (Q)">Select all</button>
+    <button id="btnAMove" title="Attack-move: next click/tap (X)">Attack-move</button>
+    <button id="btnPossess" class="accent" title="Take control of a selected unit (F)">Possess ▶</button>
+  </div>
+
+  <!-- FPS controls -->
+  <div id="fpsUI">
+    <div id="crosshair"></div>
+    <div id="vignette"></div>
+    <div id="fpsTop" class="bar">
+      <button id="btnExit" title="Back to command view (F / Tab)">◀ Command</button>
+      <button id="btnSwap" title="Jump to next friendly unit (E)">Swap unit</button>
+      <button id="btnRally" title="Order your squad to attack where you aim (R)">Rally squad</button>
+    </div>
+    <div id="fpsHp"><div id="fpsHpFill"></div><span id="fpsHpText"></span></div>
+    <div id="lockHint">Click to aim · Esc frees the mouse</div>
+    <div id="stick" class="touch-only"><div id="knob"></div></div>
+    <button id="btnFire" class="touch-only">FIRE</button>
+  </div>
+</div>
+
+<div id="menu" class="screen">
+  <div class="card">
+    <h1>Vanguard Shift</h1>
+    <p class="lead">Command your squad from above, then drop into any soldier and fight in first person. Possessed soldiers deal double damage. Destroy the red command post.</p>
+    <div class="cols">
+      <div>
+        <h3>Desktop</h3>
+        <ul>
+          <li><b>Left click / drag</b> select units (Shift adds)</li>
+          <li><b>Right click</b> move, or attack an enemy</li>
+          <li><b>X</b> then click: attack-move · <b>Q</b> select all</li>
+          <li><b>WASD / arrows</b>, middle-drag pan · <b>wheel</b> zoom</li>
+          <li><b>F</b> or double-click a unit: possess</li>
+          <li>In FPS: <b>WASD</b> move, <b>mouse</b> aim, <b>click</b> fire, <b>R</b> rally squad, <b>E</b> swap, <b>F</b>/<b>Tab</b> back</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Touch</h3>
+        <ul>
+          <li><b>Tap</b> a unit to select · <b>drag</b> to box-select</li>
+          <li>With units selected, <b>tap</b> ground to move, an enemy to attack</li>
+          <li><b>Two fingers</b> pan and pinch-zoom</li>
+          <li><b>Double-tap</b> a unit or press <b>Possess</b></li>
+          <li>In FPS: left <b>stick</b> moves, drag right side to aim, hold <b>FIRE</b></li>
+        </ul>
+      </div>
+    </div>
+    <button id="btnStart" class="accent big">Deploy</button>
+  </div>
+</div>
+
+<div id="over" class="screen hidden">
+  <div class="card">
+    <h1 id="overTitle"></h1>
+    <p id="overText"></p>
+    <button id="btnRestart" class="accent big">Play again</button>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
