@@ -11,6 +11,7 @@ import { UnrealBloomPass } from '../vendor/jsm/postprocessing/UnrealBloomPass.js
 import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from '../vendor/jsm/postprocessing/ShaderPass.js';
 import { GTAOPass } from '../vendor/jsm/postprocessing/GTAOPass.js';
+import { RoundedBoxGeometry } from '../vendor/jsm/geometries/RoundedBoxGeometry.js';
 
 // ---------------------------------------------------------------- config
 const HALF = 30;            // map spans [-HALF, HALF] on X and Z
@@ -1313,6 +1314,68 @@ function initAudio() {
     for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.5);
   } catch { audio = null; }
 }
+// gunfire: layered transient + body + low thump + a plasma zap, with a short canyon echo through a generated reverb
+let reverb = null;
+function getReverb() {
+  if (reverb || !audio) return reverb;
+  const len = audio.sampleRate * 1.4, ir = audio.createBuffer(2, len, audio.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+  reverb = audio.createConvolver(); reverb.buffer = ir;
+  const g = audio.createGain(); g.gain.value = 0.35; reverb.connect(g); g.connect(audio.destination);
+  return reverb;
+}
+function gunSound(kind) {
+  if (!audio || audio.state !== 'running') return;
+  const t = audio.currentTime, rv = getReverb();
+  const out = audio.createGain(); out.gain.value = 0.5; out.connect(audio.destination); out.connect(rv);
+  const noise = (type, freq, q, vol, dur, rate = 1) => {
+    const src = audio.createBufferSource(); src.buffer = noiseBuf; src.playbackRate.value = rate;
+    const f = audio.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = audio.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(f); f.connect(g); g.connect(out); src.start(t); src.stop(t + dur + 0.02);
+  };
+  const tone = (type, f0, f1, vol, dur, delay = 0) => {
+    const o = audio.createOscillator(), g = audio.createGain(); o.type = type;
+    o.frequency.setValueAtTime(f0, t + delay); o.frequency.exponentialRampToValueAtTime(f1, t + delay + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.setValueAtTime(vol, t + delay); g.gain.exponentialRampToValueAtTime(0.001, t + delay + dur);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t + delay + dur + 0.02);
+  };
+  const pitch = 0.94 + Math.random() * 0.12;
+  if (kind === 'trooper' || kind === 'elite') {
+    noise('highpass', 5000, 0.7, 0.5, 0.025, 1.6);           // crack
+    noise('bandpass', 1300 * pitch, 1.2, 0.9, 0.09, 1.2);   // body
+    tone('sine', 150, 50, 0.6, 0.09);                         // thump
+    tone('sawtooth', 1800 * pitch, 260, 0.12, 0.07);          // plasma zap
+  } else if (kind === 'heavy') {
+    noise('highpass', 3000, 0.7, 0.6, 0.04, 1.2);
+    noise('lowpass', 900, 0.8, 1.4, 0.32, 0.7);
+    tone('sine', 110, 32, 1.0, 0.26);
+    tone('square', 520 * pitch, 90, 0.08, 0.18);
+  } else if (kind === 'sniper') {
+    noise('highpass', 6000, 0.7, 0.8, 0.03, 2);
+    noise('bandpass', 900 * pitch, 0.9, 1.2, 0.35, 1);
+    tone('sine', 130, 38, 0.9, 0.22);
+    tone('sawtooth', 3200, 400, 0.15, 0.16);                 // rail whine
+  } else if (kind === 'hit') {
+    out.disconnect(rv); out.gain.value = 0.35;
+    noise('bandpass', 2600, 2, 0.6, 0.05, 1.5); tone('triangle', 900, 600, 0.2, 0.05);
+  } else if (kind === 'kill') {
+    out.disconnect(rv); out.gain.value = 0.4;
+    tone('triangle', 520, 520, 0.25, 0.08); tone('triangle', 780, 780, 0.25, 0.12, 0.07); noise('lowpass', 500, 1, 0.5, 0.15, 0.6);
+  } else if (kind === 'reload') {
+    out.disconnect(rv); out.gain.value = 0.35;
+    noise('bandpass', 2400, 4, 0.5, 0.04, 1.4); tone('square', 300, 200, 0.06, 0.05, 0.05);
+    const s2 = audio.createBufferSource(); s2.buffer = noiseBuf; const f2 = audio.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 1800; f2.Q.value = 5;
+    const g2 = audio.createGain(); g2.gain.setValueAtTime(0.0001, t); g2.gain.setValueAtTime(0.5, t + 0.45); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    s2.connect(f2); f2.connect(g2); g2.connect(out); s2.start(t); s2.stop(t + 0.55);
+  } else if (kind === 'ready') {
+    out.disconnect(rv); out.gain.value = 0.4;
+    noise('bandpass', 3200, 6, 0.6, 0.03, 1.8); noise('bandpass', 1600, 6, 0.6, 0.04, 1.2);
+  } else if (kind === 'screech') { // an alien dying
+    out.gain.value = 0.25;
+    tone('sawtooth', 900 * pitch, 180, 0.35, 0.35); tone('square', 1400 * pitch, 300, 0.12, 0.25); noise('bandpass', 2000, 1, 0.4, 0.3);
+  }
+}
 function sfx(kind, x, z) {
   if (!audio || audio.state !== 'running') return;
   let vol = 0.25;
@@ -1374,6 +1437,7 @@ const grenades = [];
 const game = { cp: CP_START, relink: 0, slowmo: 0, time: 0 };
 const rts = { focus: new THREE.Vector3(0, 0, 14), zoom: 26 };
 const fps = {
+  ads: 0, adsWant: false, reloadT: 0, reloadMax: 1,
   yaw: 0, pitch: 0, firing: false, bob: 0, hitMarker: 0, killMarker: 0, hurt: 0, flash: 0, stickX: 0, stickY: 0, scoped: false,
   recoil: 0, vmKick: 0, shake: 0, bloom: 0, vx: 0, vz: 0, swayX: 0, swayY: 0, lastYaw: 0, lastPitch: 0,
 };
@@ -1564,7 +1628,7 @@ function kill(e, src) {
   campaignKill(e, src);
   burst(e.x, e.isBase ? 2 : 1, e.z, e.isBase ? 6 : 1.2, e.isBase ? 0xffaa44 : e.team === PLAYER ? 0xffc080 : 0x9cff3a);
   feathers(e.x, e.z, e.isBase ? (e.team === PLAYER ? 0x9aa0a8 : 0x6aff2a) : e.team === PLAYER ? 0x8a9098 : 0x7aff3a, e.isBase ? 40 : 14);
-  sfx(e.isBase ? 'boom' : e.team === PLAYER ? 'quack' : 'bawk', e.x, e.z);
+  if (e.isBase) sfx('boom', e.x, e.z); else if (e.team === ENEMY && mode === 'fps' && Math.hypot(e.x - camera.position.x, e.z - camera.position.z) < 30) gunSound('screech'); else sfx(e.team === PLAYER ? 'quack' : 'bawk', e.x, e.z);
   if (e.isBase || e.possessed) scene.remove(e.mesh);
   else { if (e.ring) e.ring.visible = false; tumble(e.mesh); }
   if (e.isBase) {
@@ -1888,107 +1952,133 @@ function updateGrenades(dt) {
 
 // ---------------------------------------------------------------- FPS control
 const viewmodel = new THREE.Group();
-// first-person weapons: one model per kit, built from simple parts but with real gun anatomy
-// (receiver, rail, handguard, barrel, muzzle brake, magazine, stock, optic) and an armoured glove + sleeve holding it
+// first-person weapons: one model per kit with rounded edges and real gun anatomy, held in gloved hands
 {
-  const metal = toon({ color: 0x4a515b, roughness: 0.32, metalness: 0.6 });
-  const poly = toon({ color: 0x2c3036, roughness: 0.62, metalness: 0.1 });       // polymer furniture
-  const paint = toon({ color: 0x7d7a62, roughness: 0.55, metalness: 0.25 });     // olive panels
-  const edge = toon({ color: 0x8c949e, roughness: 0.28, metalness: 0.65 });      // worn bright edges
-  const glow = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.35, 1.6, 2.6) }); // energy strip and coils
-  const lens = new THREE.MeshStandardMaterial({ color: 0x0b1820, emissive: 0xff4a3a, emissiveIntensity: 0.6, roughness: 0.05, metalness: 0.4 });
-  const sleeve = toon({ color: 0x6b7a66, roughness: 0.5, metalness: 0.45 });     // tinted to the marine's armour on possess
-  const glove = toon({ color: 0x23262b, roughness: 0.75, metalness: 0.05 });
-  const box = (g, mat, w, h, d, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
-  const tube = (g, mat, r1, r2, len, x, y, z, seg = 12) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, len, seg), mat); m.rotation.x = Math.PI / 2; m.position.set(x, y, z); g.add(m); return m; };
-  const ring = (g, mat, r, t, x, y, z) => { const m = new THREE.Mesh(new THREE.TorusGeometry(r, t, 6, 18), mat); m.position.set(x, y, z); g.add(m); return m; };
+  const metal = toon({ color: 0x3b4149, roughness: 0.34, metalness: 0.62 });
+  const dark = toon({ color: 0x1f2328, roughness: 0.5, metalness: 0.4 });
+  const poly = toon({ color: 0x2a2e33, roughness: 0.7, metalness: 0.08 });
+  const paint = toon({ color: 0x6f6b52, roughness: 0.6, metalness: 0.2 });     // olive panels
+  const edge = toon({ color: 0x9aa3ad, roughness: 0.25, metalness: 0.65 });    // worn bright edges
+  const brass = toon({ color: 0xc8a050, roughness: 0.3, metalness: 0.65 });
+  const glow = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.35, 1.7, 2.8) });
+  const lens = new THREE.MeshStandardMaterial({ color: 0x0b1820, emissive: 0x2a6080, emissiveIntensity: 0.35, roughness: 0.02, metalness: 0.5, transparent: true, opacity: 0.55 });
+  const reticle = new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 0.5, 0.3) });
+  const sleeve = toon({ color: 0x6b7a66, roughness: 0.5, metalness: 0.45 });
+  const glove = toon({ color: 0x24272c, roughness: 0.8, metalness: 0.05 });
+  const knuckle = toon({ color: 0x3a3f46, roughness: 0.5, metalness: 0.4 });
+  const R = (w, h, d, r = 0.008) => new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2.2, h / 2.2, d / 2.2));
+  const box = (g, mat, w, h, d, x, y, z, rx = 0, r) => { const m = new THREE.Mesh(R(w, h, d, r), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
+  const tube = (g, mat, r1, r2, len, x, y, z, seg = 14) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, len, seg), mat); m.rotation.x = Math.PI / 2; m.position.set(x, y, z); g.add(m); return m; };
+  const ring = (g, mat, r, t, x, y, z) => { const m = new THREE.Mesh(new THREE.TorusGeometry(r, t, 8, 20), mat); m.position.set(x, y, z); g.add(m); return m; };
+  const rail = (g, len, y, z) => { box(g, dark, 0.034, 0.01, len, 0, y, z, 0, 0.003); for (let t = -len / 2 + 0.012; t < len / 2; t += 0.024) box(g, dark, 0.04, 0.008, 0.01, 0, y + 0.008, z + t, 0, 0.002); };
   const hands = (g, gripZ, foreZ, foreY) => {
-    box(g, glove, 0.07, 0.075, 0.085, 0.004, -0.085, gripZ + 0.01);                       // right hand on the grip
-    box(g, glove, 0.02, 0.03, 0.06, -0.03, -0.045, gripZ - 0.035);                         // trigger finger
-    const s1 = tube(g, sleeve, 0.05, 0.058, 0.32, 0.03, -0.14, gripZ + 0.2, 10); s1.rotation.x = Math.PI / 2 - 0.55; // forearm armour
-    ring(g, edge, 0.052, 0.008, 0.02, -0.11, gripZ + 0.1).rotation.x = Math.PI / 2 - 0.55;
-    box(g, glove, 0.075, 0.06, 0.1, -0.012, foreY - 0.045, foreZ);                         // left hand under the handguard
-    const s2 = tube(g, sleeve, 0.048, 0.056, 0.36, -0.13, foreY - 0.13, foreZ + 0.12, 10); s2.rotation.set(Math.PI / 2 - 0.6, 0, -0.75);
+    // right hand wrapped around the grip, index finger on the trigger guard
+    box(g, glove, 0.062, 0.085, 0.07, 0.006, -0.088, gripZ + 0.012, -0.3, 0.02);
+    for (let f = 0; f < 3; f++) box(g, glove, 0.018, 0.022, 0.05, -0.028, -0.06 - f * 0.024, gripZ - 0.024, -0.3, 0.008);
+    box(g, glove, 0.016, 0.018, 0.055, -0.028, -0.035, gripZ - 0.05, 0, 0.007);
+    box(g, knuckle, 0.05, 0.03, 0.04, 0.03, -0.07, gripZ + 0.02, -0.3, 0.01);
+    const s1 = tube(g, sleeve, 0.046, 0.056, 0.34, 0.03, -0.15, gripZ + 0.2, 12); s1.rotation.x = Math.PI / 2 - 0.55;
+    ring(g, edge, 0.05, 0.007, 0.022, -0.11, gripZ + 0.1).rotation.x = Math.PI / 2 - 0.55;
+    // left hand under the handguard, thumb over the top
+    box(g, glove, 0.07, 0.055, 0.1, -0.008, foreY - 0.05, foreZ, 0, 0.02);
+    box(g, glove, 0.018, 0.02, 0.07, -0.042, foreY - 0.005, foreZ - 0.01, 0, 0.008);
+    for (let f = 0; f < 3; f++) box(g, glove, 0.02, 0.02, 0.022, 0.04, foreY - 0.02, foreZ - 0.035 + f * 0.026, 0, 0.008);
+    const s2 = tube(g, sleeve, 0.044, 0.054, 0.38, -0.14, foreY - 0.14, foreZ + 0.13, 12); s2.rotation.set(Math.PI / 2 - 0.6, 0, -0.75);
   };
-  const strip = (g, len, z, y = 0.01) => { box(g, glow, 0.004, 0.01, len, 0.043, y, z); box(g, glow, 0.004, 0.01, len, -0.043, y, z); };
   const kits = {};
-  { // Marine: compact pulse rifle with a red-dot sight
+  { // Marine: compact pulse rifle with a holographic sight
     const g = new THREE.Group();
-    box(g, metal, 0.08, 0.1, 0.34, 0, 0, -0.12);                 // receiver
-    box(g, paint, 0.084, 0.05, 0.2, 0, -0.01, -0.14);            // side panels
-    box(g, edge, 0.04, 0.012, 0.36, 0, 0.056, -0.16);            // top rail
-    for (let k = 0; k < 7; k++) box(g, metal, 0.046, 0.008, 0.012, 0, 0.066, -0.03 - k * 0.042);
-    box(g, poly, 0.074, 0.08, 0.24, 0, -0.005, -0.4);           // handguard
-    for (let k = 0; k < 4; k++) { box(g, glow, 0.078, 0.012, 0.03, 0, 0.006, -0.32 - k * 0.055); }
-    tube(g, metal, 0.016, 0.016, 0.16, 0, 0.005, -0.58);         // barrel
-    tube(g, edge, 0.026, 0.024, 0.06, 0, 0.005, -0.67, 8);       // muzzle brake
-    box(g, poly, 0.05, 0.15, 0.075, 0, -0.11, -0.2, 0.22);        // magazine
-    box(g, glow, 0.052, 0.012, 0.02, 0, -0.16, -0.215, 0.22);     // ammo counter
-    box(g, poly, 0.045, 0.1, 0.05, 0, -0.08, 0.0, -0.3);          // grip
-    box(g, poly, 0.06, 0.085, 0.16, 0, -0.01, 0.12);              // stock
-    box(g, glove, 0.065, 0.1, 0.03, 0, -0.01, 0.205);             // butt pad
-    box(g, metal, 0.05, 0.05, 0.09, 0, 0.1, -0.1);                // optic housing
-    const l = tube(g, lens, 0.02, 0.02, 0.005, 0, 0.1, -0.147, 14); l.rotation.x = Math.PI / 2;
-    strip(g, 0.2, -0.13);
-    hands(g, 0.0, -0.4, -0.005);
-    kits.trooper = { g, muzzle: -0.71 };
+    box(g, metal, 0.07, 0.085, 0.3, 0, 0, -0.12, 0, 0.012);                 // upper receiver
+    box(g, paint, 0.074, 0.05, 0.18, 0, -0.035, -0.12, 0, 0.012);           // lower receiver
+    box(g, dark, 0.012, 0.03, 0.06, 0.037, 0.012, -0.06, 0, 0.004);         // ejection port cover
+    box(g, edge, 0.02, 0.012, 0.03, -0.04, 0.03, -0.02, 0, 0.004);          // charging handle
+    rail(g, 0.34, 0.05, -0.16);
+    box(g, poly, 0.068, 0.07, 0.24, 0, -0.002, -0.4, 0, 0.018);             // handguard
+    for (let k = 0; k < 4; k++) { box(g, dark, 0.072, 0.008, 0.028, 0, 0.02, -0.33 - k * 0.05, 0, 0.003); box(g, glow, 0.073, 0.004, 0.02, 0, 0.004, -0.33 - k * 0.05, 0, 0.001); }
+    tube(g, metal, 0.015, 0.015, 0.16, 0, 0.005, -0.58);                    // barrel
+    tube(g, edge, 0.025, 0.022, 0.055, 0, 0.005, -0.67, 8);                 // muzzle brake
+    for (let k = 0; k < 3; k++) box(g, dark, 0.052, 0.006, 0.008, 0, 0.005, -0.655 - k * 0.014, 0, 0.002);
+    box(g, poly, 0.044, 0.14, 0.07, 0, -0.11, -0.19, 0.22, 0.012);          // magazine
+    box(g, glow, 0.046, 0.01, 0.016, 0, -0.16, -0.205, 0.22, 0.003);        // ammo counter strip
+    box(g, poly, 0.04, 0.095, 0.05, 0, -0.08, 0.0, -0.3, 0.012);            // grip
+    box(g, dark, 0.008, 0.035, 0.05, 0, -0.055, -0.045, 0, 0.003);          // trigger guard
+    box(g, poly, 0.052, 0.075, 0.15, 0, -0.008, 0.12, 0, 0.02);             // stock
+    box(g, glove, 0.058, 0.09, 0.025, 0, -0.008, 0.2, 0, 0.01);             // butt pad
+    box(g, metal, 0.03, 0.03, 0.06, 0.04, -0.01, -0.42, 0, 0.006);          // laser module
+    box(g, glow, 0.012, 0.012, 0.003, 0.04, -0.01, -0.452, 0, 0.002);
+    // holo sight: a frame you look through, with a glowing red reticle
+    box(g, dark, 0.05, 0.012, 0.075, 0, 0.065, -0.1, 0, 0.004);
+    box(g, metal, 0.006, 0.045, 0.06, 0.024, 0.095, -0.1, 0, 0.003); box(g, metal, 0.006, 0.045, 0.06, -0.024, 0.095, -0.1, 0, 0.003);
+    box(g, metal, 0.054, 0.006, 0.06, 0, 0.12, -0.1, 0, 0.003);
+    const gl = new THREE.Mesh(new THREE.PlaneGeometry(0.042, 0.04), lens); gl.position.set(0, 0.095, -0.12); g.add(gl);
+    const rt = new THREE.Mesh(new THREE.RingGeometry(0.003, 0.0045, 16), reticle); rt.position.set(0, 0.095, -0.121); g.add(rt);
+    const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0012, 8), reticle); dot.position.set(0, 0.095, -0.1215); g.add(dot);
+    hands(g, 0.0, -0.4, -0.004);
+    kits.trooper = { g, muzzle: -0.71, sightY: 0.095, port: [0.04, 0.012, -0.06], mag: 32, reload: 1.5 };
   }
   { // Juggernaut: a heavy tri-barrel plasma cannon with glowing coils and a power cell
     const g = new THREE.Group();
-    box(g, metal, 0.13, 0.13, 0.42, 0, 0, -0.16);
-    box(g, paint, 0.136, 0.07, 0.26, 0, 0.02, -0.17);
-    box(g, edge, 0.06, 0.014, 0.3, 0, 0.073, -0.16);
+    box(g, metal, 0.12, 0.12, 0.4, 0, 0, -0.16, 0, 0.025);
+    box(g, paint, 0.126, 0.06, 0.24, 0, 0.022, -0.17, 0, 0.018);
+    rail(g, 0.28, 0.066, -0.16);
     for (let k = 0; k < 3; k++) {
       const a = k / 3 * Math.PI * 2 + Math.PI / 2;
-      tube(g, metal, 0.022, 0.022, 0.32, Math.cos(a) * 0.035, Math.sin(a) * 0.035 + 0.005, -0.5, 10);
+      tube(g, metal, 0.02, 0.021, 0.32, Math.cos(a) * 0.034, Math.sin(a) * 0.034 + 0.005, -0.5, 12);
+      tube(g, dark, 0.012, 0.012, 0.33, Math.cos(a) * 0.034, Math.sin(a) * 0.034 + 0.005, -0.5, 8);
     }
-    for (let k = 0; k < 3; k++) ring(g, glow, 0.066, 0.009, 0, 0.005, -0.42 - k * 0.07);
-    tube(g, edge, 0.07, 0.065, 0.05, 0, 0.005, -0.66, 14);
-    const cell = tube(g, poly, 0.045, 0.045, 0.22, 0.095, -0.03, -0.12, 12);
-    ring(g, glow, 0.047, 0.006, 0.095, -0.03, -0.06); ring(g, glow, 0.047, 0.006, 0.095, -0.03, -0.18); cell.userData.cell = true;
-    box(g, poly, 0.05, 0.1, 0.06, 0, -0.1, 0.0, -0.25);
-    box(g, poly, 0.07, 0.04, 0.12, 0, -0.085, -0.26);              // fore handle
-    box(g, metal, 0.11, 0.1, 0.12, 0, -0.005, 0.1);
-    strip(g, 0.3, -0.16, 0.035);
-    hands(g, 0.0, -0.26, -0.06);
-    kits.heavy = { g, muzzle: -0.7 };
+    for (let k = 0; k < 3; k++) ring(g, glow, 0.064, 0.008, 0, 0.005, -0.42 - k * 0.07);
+    tube(g, edge, 0.068, 0.062, 0.05, 0, 0.005, -0.66, 18);
+    tube(g, poly, 0.042, 0.042, 0.22, 0.092, -0.03, -0.12, 14);
+    ring(g, glow, 0.044, 0.006, 0.092, -0.03, -0.06); ring(g, glow, 0.044, 0.006, 0.092, -0.03, -0.18);
+    box(g, poly, 0.046, 0.1, 0.06, 0, -0.1, 0.0, -0.25, 0.014);
+    box(g, poly, 0.06, 0.04, 0.12, 0, -0.085, -0.27, 0, 0.012);
+    box(g, metal, 0.1, 0.095, 0.12, 0, -0.005, 0.1, 0, 0.022);
+    box(g, dark, 0.05, 0.03, 0.08, 0, 0.09, -0.08, 0, 0.008);                  // sight block
+    const rt = new THREE.Mesh(new THREE.RingGeometry(0.006, 0.008, 16), reticle); rt.position.set(0, 0.11, -0.122); g.add(rt);
+    hands(g, 0.0, -0.27, -0.065);
+    kits.heavy = { g, muzzle: -0.7, sightY: 0.11, port: [0.07, 0.03, -0.1], mag: 8, reload: 2.0 };
   }
   { // Ranger: a long rail rifle with a big scope and a folding bipod
     const g = new THREE.Group();
-    box(g, metal, 0.064, 0.085, 0.36, 0, 0, -0.12);
-    box(g, paint, 0.068, 0.04, 0.22, 0, -0.012, -0.12);
-    box(g, poly, 0.06, 0.07, 0.26, 0, -0.005, -0.42);
-    for (let k = 0; k < 5; k++) box(g, glow, 0.064, 0.008, 0.024, 0, 0.012, -0.33 - k * 0.045);
-    tube(g, metal, 0.014, 0.017, 0.4, 0, 0.0, -0.74, 10);         // long barrel
-    tube(g, edge, 0.022, 0.022, 0.08, 0, 0.0, -0.96, 8);           // suppressor-ish brake
-    tube(g, metal, 0.03, 0.03, 0.24, 0, 0.1, -0.14, 14);           // scope tube
-    tube(g, metal, 0.04, 0.03, 0.05, 0, 0.1, -0.28, 14);           // objective bell
-    tube(g, metal, 0.036, 0.03, 0.04, 0, 0.1, -0.005, 14);         // eyepiece
-    const l = tube(g, lens, 0.034, 0.034, 0.004, 0, 0.1, -0.307, 14); lens.emissive.setHex(0xff4a3a);
-    box(g, metal, 0.02, 0.05, 0.03, 0, 0.06, -0.08); box(g, metal, 0.02, 0.05, 0.03, 0, 0.06, -0.2); // rings
-    box(g, poly, 0.04, 0.1, 0.045, 0, -0.08, 0.0, -0.3);
-    box(g, poly, 0.045, 0.1, 0.06, 0, -0.1, -0.16, 0.15);
-    const st = box(g, poly, 0.05, 0.03, 0.2, 0, 0.02, 0.15); box(g, poly, 0.05, 0.03, 0.18, 0, -0.06, 0.15, 0.25); box(g, glove, 0.055, 0.12, 0.03, 0, -0.02, 0.255);
-    box(g, edge, 0.012, 0.012, 0.16, 0.02, -0.05, -0.5); box(g, edge, 0.012, 0.012, 0.16, -0.02, -0.05, -0.5); // folded bipod
-    strip(g, 0.18, -0.12);
-    hands(g, 0.0, -0.42, -0.01);
-    kits.sniper = { g, muzzle: -1.0 };
+    box(g, metal, 0.058, 0.078, 0.34, 0, 0, -0.12, 0, 0.012);
+    box(g, paint, 0.062, 0.04, 0.2, 0, -0.016, -0.12, 0, 0.01);
+    box(g, poly, 0.054, 0.064, 0.26, 0, -0.004, -0.42, 0, 0.016);
+    for (let k = 0; k < 5; k++) box(g, glow, 0.058, 0.006, 0.022, 0, 0.012, -0.33 - k * 0.045, 0, 0.002);
+    tube(g, metal, 0.013, 0.016, 0.4, 0, 0.0, -0.74, 12);
+    tube(g, edge, 0.021, 0.021, 0.08, 0, 0.0, -0.96, 10);
+    tube(g, dark, 0.028, 0.028, 0.24, 0, 0.1, -0.14, 18);
+    tube(g, dark, 0.038, 0.028, 0.05, 0, 0.1, -0.28, 18);
+    tube(g, dark, 0.034, 0.028, 0.04, 0, 0.1, -0.005, 18);
+    ring(g, edge, 0.03, 0.004, 0, 0.1, -0.2);
+    const l = new THREE.Mesh(new THREE.CircleGeometry(0.033, 18), lens); l.position.set(0, 0.1, -0.306); l.rotation.y = Math.PI; g.add(l);
+    box(g, metal, 0.02, 0.05, 0.026, 0, 0.06, -0.08, 0, 0.005); box(g, metal, 0.02, 0.05, 0.026, 0, 0.06, -0.2, 0, 0.005);
+    box(g, poly, 0.038, 0.1, 0.045, 0, -0.08, 0.0, -0.3, 0.012);
+    box(g, poly, 0.04, 0.1, 0.06, 0, -0.1, -0.16, 0.15, 0.012);
+    box(g, poly, 0.046, 0.03, 0.2, 0, 0.02, 0.15, 0, 0.01); box(g, poly, 0.046, 0.03, 0.18, 0, -0.06, 0.15, 0.25, 0.01); box(g, glove, 0.05, 0.12, 0.028, 0, -0.02, 0.255, 0, 0.01);
+    box(g, edge, 0.01, 0.01, 0.16, 0.018, -0.05, -0.5, 0, 0.003); box(g, edge, 0.01, 0.01, 0.16, -0.018, -0.05, -0.5, 0, 0.003);
+    hands(g, 0.0, -0.42, -0.008);
+    kits.sniper = { g, muzzle: -1.0, sightY: 0.1, port: [0.035, 0.01, -0.08], mag: 5, reload: 2.2 };
   }
   for (const k in kits) { kits[k].g.visible = false; viewmodel.add(kits[k].g); }
   viewmodel.userData.kits = kits;
   viewmodel.userData.wing = { material: sleeve };
+  viewmodel.userData.brass = brass;
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.005, -0.71); viewmodel.add(muzzle);
   viewmodel.userData.muzzle = muzzle;
+  const port = new THREE.Object3D(); viewmodel.add(port); viewmodel.userData.port = port;
   const flash = new THREE.Group();
-  const flashMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 2.6, 3.6), transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
-  for (let k = 0; k < 3; k++) { // a star of crossed quads
-    const q = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.07), flashMat); q.rotation.z = k * Math.PI / 3; flash.add(q);
+  const flashMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.4, 2.6, 3.6), transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  for (let k = 0; k < 4; k++) { // a star of crossed quads plus a forward cone
+    const q = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.05), flashMat); q.rotation.z = k * Math.PI / 4; flash.add(q);
   }
-  const core = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.22, 8, 1, true), flashMat); cone.rotation.x = -Math.PI / 2; cone.position.z = -0.1; flash.add(cone);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
   flash.add(core);
   flash.position.set(0, 0.005, -0.75); flash.visible = false; viewmodel.add(flash);
   viewmodel.userData.flash = flash;
-  // a soft fill light that only reaches the gun, so it never turns into a black silhouette against the sky
+  // the muzzle flash lights up the gun, your hands and the ground around you for a frame
+  const flashLight = new THREE.PointLight(0x9fdcff, 0, 7, 2); flashLight.position.set(0, 0.05, -0.8); viewmodel.add(flashLight);
+  viewmodel.userData.flashLight = flashLight;
   const fill = new THREE.PointLight(0xdfe8ff, 0.12, 1.2, 2); fill.position.set(-0.1, 0.25, 0.1); viewmodel.add(fill);
   viewmodel.position.set(0.22, -0.22, -0.35);
   viewmodel.scale.setScalar(0.8);
@@ -1999,8 +2089,11 @@ const viewmodel = new THREE.Group();
 function setViewGun(type) {
   const kits = viewmodel.userData.kits, kit = kits[type] || kits.trooper;
   for (const k in kits) kits[k].g.visible = kits[k] === kit;
+  viewmodel.userData.kit = kit;
   viewmodel.userData.muzzle.position.z = kit.muzzle;
   viewmodel.userData.flash.position.z = kit.muzzle - 0.04;
+  viewmodel.userData.flashLight.position.z = kit.muzzle - 0.1;
+  viewmodel.userData.port.position.set(...kit.port);
 }
 
 
@@ -2023,6 +2116,8 @@ function possess(u) {
   fps.vx = fps.vz = fps.recoil = fps.bloom = fps.vy = 0; fps.dash = null; u.y = 0; fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
   viewmodel.userData.wing.material.color.copy(u.bodyMat.color).multiplyScalar(0.7);
   setViewGun(u.type);
+  if (u.ammo === undefined) u.ammo = viewmodel.userData.kit.mag;
+  fps.reloadT = 0; fps.adsWant = false;
   if (!selection.includes(u)) selection.push(u);
   game.slowmo = swap ? 0.6 : 1.3;
   setMode('fps', swap ? 3 : 9);
@@ -2233,13 +2328,23 @@ function updateDucklings(dt) {
   }
 }
 
+function startReload(u) {
+  const kit = viewmodel.userData.kit;
+  if (!u || fps.reloadT > 0 || u.ammo >= kit.mag) return;
+  fps.reloadT = fps.reloadMax = kit.reload;
+  gunSound('reload');
+}
 function playerShoot(u) {
   const gun = GUNS[u.type];
+  const kit = viewmodel.userData.kit;
+  if (fps.reloadT > 0) return;
+  if (u.ammo <= 0) { startReload(u); return; }
+  u.ammo--;
   u.cool += gun.rate; if (u.cool < 0) u.cool = 0; // keeps the fire rate exact at any frame rate
   camera.updateMatrixWorld(true);
   const targets = (hawk.t > 0 ? [ground] : staticShootables).concat(entities.filter(e => !e.dead && !e.possessed).map(e => e.mesh));
   const mz = fps.scoped ? camera.position.clone().add(new THREE.Vector3(0, -0.15, 0)) : viewmodel.userData.muzzle.getWorldPosition(new THREE.Vector3());
-  const spreadBase = fps.scoped ? 0.0008 : gun.spread * (1 + fps.bloom * 1.5);
+  const spreadBase = fps.scoped ? 0.0008 : gun.spread * (1 + fps.bloom * 1.5) * (1 - 0.65 * fps.ads);
   let hits = 0, killed = false;
   for (let i = 0; i < gun.pellets; i++) {
     const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * spreadBase;
@@ -2252,7 +2357,7 @@ function playerShoot(u) {
     if (enemy) {
       let dmg = gun.dmg;
       const crit = u.type === 'sniper' && !enemy.isBase && hit.point.y > 1.25 * (enemy.elite ? 1.3 : 1);
-      if (crit) { dmg *= 2.5; toast('Beak shot!', 0.6); }
+      if (crit) { dmg *= 2.5; toast('Headshot!', 0.6); }
       const wasShielded = enemy.isBase && enemy.shield;
       damage(enemy, dmg, u);
       if (!wasShielded) dmgNumber(end, dmg, crit);
@@ -2268,25 +2373,30 @@ function playerShoot(u) {
     const team = enemy && !enemy.isBase ? enemy.team : null;
     shootBullet(mz, end, 'corn', gun.speed, surf === null ? null : () => {
       if (surf === 'feather') { feathers(end.x, end.z, team === ENEMY ? 0x7aff3a : 0x8a9098, 2); burst(end.x, end.y, end.z, 0.25, team === ENEMY ? 0x9cff3a : 0xffd0a0); }
-      else impactPuff(end, surf, gun.pellets > 1 ? 2 : 4);
+      else { impactPuff(end, surf, gun.pellets > 1 ? 2 : 4); if (surf !== 0x8a5a3c) burst(end.x, end.y, end.z, 0.16, 0xffc070); } // sparks off metal
     }, gun.pellets > 1 ? 0.8 : 1.2);
   }
-  if (hits) { fps.hitMarker = 0.12; sfx('hit'); }
+  if (hits) { fps.hitMarker = 0.12; gunSound(killed ? 'kill' : 'hit'); }
   if (killed) fps.killMarker = 0.45;
+  viewmodel.userData.flashLight.intensity = gun.pellets > 1 ? 9 : 6;
   // feel: flash, light, kick, shake, bloom, a popcorn shell
   const fl = viewmodel.userData.flash;
   fl.visible = true; fl.scale.setScalar((gun.pellets > 1 ? 1.8 : 1) * (0.8 + Math.random() * 0.7)); fl.rotation.z = Math.random() * 6;
   fps.flash = 0.05;
-  fps.recoil += gun.kick * (0.7 + Math.random() * 0.6);
-  fps.yaw += (Math.random() - 0.5) * gun.kick * 0.5;
+  const steady = 1 - 0.45 * fps.ads;
+  fps.recoil += gun.kick * (0.7 + Math.random() * 0.6) * steady;
+  fps.yaw += (Math.random() - 0.5) * gun.kick * 0.5 * steady;
+  fps.vmRoll = (Math.random() - 0.5) * 0.12;
   fps.vmKick = Math.min(1.5, fps.vmKick + (gun.pellets > 1 ? 1.4 : u.type === 'sniper' ? 1.2 : 0.55));
   fps.shake = Math.min(0.3, fps.shake + gun.shake);
   fps.bloom = Math.min(1, fps.bloom + (u.type === 'trooper' ? 0.12 : 0.5));
-  if (!fps.scoped) {
+  if (!fps.scoped) { // a hot casing flips out of the ejection port
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    spawnDebris(mz.clone().addScaledVector(right, -0.05), right.multiplyScalar(2 + Math.random() * 1.5).add(new THREE.Vector3(0, 2.5 + Math.random(), 0)), 0xfffbe8, 0.035, 1.0);
+    const port = viewmodel.userData.port.getWorldPosition(new THREE.Vector3());
+    spawnDebris(port, right.multiplyScalar(1.6 + Math.random() * 1.2).add(new THREE.Vector3(0, 1.8 + Math.random(), 0)), 0xc8a050, 0.028, 1.2);
   }
-  sfx(gun.sound);
+  gunSound(u.type);
+  if (u.ammo <= 0) setTimeout(() => { if (possessed === u) startReload(u); }, 120);
 }
 
 function updateFPS(dt, simDt) {
@@ -2302,7 +2412,7 @@ function updateFPS(dt, simDt) {
   if (len > 1) { f /= len; s /= len; }
   const yaw = fps.yaw;
   const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
-  const sp = u.speed * 1.15 * (fps.scoped ? 0.45 : 1);
+  const sp = u.speed * 1.15 * (fps.scoped ? 0.45 : 1) * (1 - 0.35 * fps.ads);
   // accelerate / brake smoothly instead of snapping to full speed
   const k = Math.min(1, simDt * 12);
   fps.vx += ((fx * f + rx * s) * sp - fps.vx) * k;
@@ -2338,7 +2448,8 @@ function updateFPS(dt, simDt) {
   const v = Math.hypot(fps.vx, fps.vz);
   if (v > 0.3) fps.bob += simDt * 9 * Math.min(1, v / sp);
   if (isTouch && fps.firing) aimAssist(dt);
-  if (fps.firing) { let n = 0; while (u.cool <= 0 && n++ < 3) playerShoot(u); } // catch up on slow frames
+  if (fps.reloadT > 0) { fps.reloadT -= dt; if (fps.reloadT <= 0) { u.ammo = viewmodel.userData.kit.mag; gunSound('ready'); } }
+  if (fps.firing && fps.reloadT <= 0) { let n = 0; while (u.cool <= 0 && n++ < 3) playerShoot(u); } // catch up on slow frames
   else if (u.cool < 0) u.cool = 0;
 }
 
@@ -2384,7 +2495,7 @@ function fpsPose() {
   const sh = fps.shake;
   euler.set(fps.pitch + fps.recoil + (Math.random() - 0.5) * sh * 0.08, fps.yaw + (Math.random() - 0.5) * sh * 0.08, (Math.random() - 0.5) * sh * 0.04);
   const roll = fps.dash && fps.dash.roll ? Math.sin((0.32 - fps.dash.t) / 0.32 * Math.PI) : 0;
-  return { pos: new THREE.Vector3(u.x + (Math.random() - 0.5) * sh * 0.05, (u.y || 0) + EYE + bob - roll * 0.7, u.z), quat: new THREE.Quaternion().setFromEuler(euler), fov: fps.scoped ? 22 : 72 };
+  return { pos: new THREE.Vector3(u.x + (Math.random() - 0.5) * sh * 0.05, (u.y || 0) + EYE + bob - roll * 0.7, u.z), quat: new THREE.Quaternion().setFromEuler(euler), fov: fps.scoped ? 22 : 72 - 20 * fps.ads };
 }
 
 function setMode(m, arc = 0) {
@@ -2445,16 +2556,29 @@ function updateCamera(dt) {
   fps.swayY += (Math.max(-0.05, Math.min(0.05, -dpitch * 0.6)) - fps.swayY) * ks;
   const walk = Math.min(1, Math.hypot(fps.vx, fps.vz) / 4);
   const portrait = camera.aspect < 1;
-  viewmodel.scale.setScalar(portrait ? 0.42 : 0.5);
+  // aim down sights: slide the sight onto the crosshair; reload: dip and tilt the gun
+  const wantAds = fps.adsWant || (isTouch && fps.firing) ? (isTouch && !fps.adsWant ? 0.55 : 1) : 0;
+  fps.ads += ((fps.reloadT > 0 ? 0 : wantAds) - fps.ads) * Math.min(1, dt * 13);
+  const kitNow = viewmodel.userData.kit;
+  const rl = fps.reloadT > 0 ? Math.sin(Math.min(1, 1 - fps.reloadT / fps.reloadMax) * Math.PI) : 0;
+  const vs = portrait ? 0.42 : 0.5;
+  viewmodel.scale.setScalar(vs);
+  fps.vmRoll = (fps.vmRoll || 0) * Math.exp(-dt * 12);
+  viewmodel.userData.flashLight.intensity *= Math.exp(-dt * 40);
   viewmodel.position.set(
     (portrait ? 0.09 : 0.17) + fps.swayX + Math.cos(fps.bob * 0.5) * 0.012 * walk,
     (portrait ? -0.12 : -0.17) + fps.swayY - Math.abs(Math.sin(fps.bob * 0.5)) * 0.014 * walk - fps.vmKick * 0.012,
     -0.35 + fps.vmKick * 0.07);
-  viewmodel.rotation.set(fps.vmKick * 0.18, fps.swayX * 1.5, -fps.swayX * 2);
+  const hipX = viewmodel.position.x, hipY = viewmodel.position.y, a = fps.ads;
+  viewmodel.position.x = hipX * (1 - a) + fps.swayX * 0.3 * a;
+  viewmodel.position.y = hipY * (1 - a) + (-(kitNow ? kitNow.sightY : 0.1) * vs - fps.vmKick * 0.006) * a - rl * 0.12;
+  viewmodel.position.z += -0.04 * a + rl * 0.05;
+  viewmodel.rotation.set(fps.vmKick * (0.18 - 0.1 * a) - rl * 0.7, fps.swayX * 1.5 * (1 - 0.7 * a), -fps.swayX * 2 * (1 - 0.7 * a) + fps.vmRoll + rl * 0.5);
   fps.flash -= dt;
   if (fps.flash <= 0) viewmodel.userData.flash.visible = false;
   const ch = $('crosshair');
   ch.style.transform = fps.scoped ? '' : `scale(${1 + fps.bloom * 0.9})`;
+  ch.style.opacity = fps.scoped ? 1 : Math.max(0, 1 - fps.ads * 1.6); // the holo sight takes over when aiming
 }
 
 // ---------------------------------------------------------------- picking
@@ -2524,7 +2648,7 @@ canvas.addEventListener('pointerdown', e => {
     else if (!document.pointerLockElement) {
       try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch { /* ignore */ }
     } else if (e.button === 0) fps.firing = true;
-    else if (e.button === 2 && possessed) useAbility(possessed.type === 'sniper' ? 0 : 1);
+    else if (e.button === 2 && possessed) { if (possessed.type === 'sniper') useAbility(0); else fps.adsWant = true; }
   }
 });
 
@@ -2567,7 +2691,7 @@ canvas.addEventListener('pointermove', e => {
 function endPointer(e) {
   const p = pointers.get(e.pointerId);
   pointers.delete(e.pointerId);
-  if (mode === 'fps') { if (e.pointerType === 'mouse' && e.button === 0) fps.firing = false; return; } // a lifted look finger must not stop the FIRE button
+  if (mode === 'fps') { if (e.pointerType === 'mouse' && e.button === 0) fps.firing = false; if (e.pointerType === 'mouse' && e.button === 2) fps.adsWant = false; return; } // a lifted look finger must not stop the FIRE button
   if (!p || mode !== 'rts') return;
   if (gesture) { if (pointers.size === 0) gesture = null; return; }
   if (e.type === 'pointercancel') { boxSel = null; return; }
@@ -2658,7 +2782,8 @@ window.addEventListener('keydown', e => {
     else if (e.code === 'Escape') { amoveArmed = false; selection = []; updateButtons(); }
   } else if (mode === 'fps') {
     if (e.code === 'KeyF' || e.code === 'Tab') exitFPS();
-    else if (e.code === 'KeyR') rally();
+    else if (e.code === 'KeyR') startReload(possessed);
+    else if (e.code === 'KeyG') rally();
     else if (e.code === 'KeyC') swapUnit();
     else if (e.code === 'KeyQ') useAbility(0);
     else if (e.code === 'KeyE') useAbility(1);
@@ -3350,6 +3475,15 @@ function updateHud(dt) {
     const k = Math.max(0, possessed.hp / possessed.maxHp);
     $('fpsHpFill').style.width = `${k * 100}%`;
     $('fpsHpText').textContent = `${(possessed.callsign || nameOf(possessed)).toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  hero`;
+    { // ammo counter
+      const kit = viewmodel.userData.kit, el = $('ammo');
+      if (kit) {
+        const rel = fps.reloadT > 0;
+        $('ammoN').textContent = rel ? 'RELOADING' : possessed.ammo; $('ammoMax').textContent = rel ? '' : `/ ${kit.mag}`;
+        $('ammoBar').style.transform = `scaleX(${rel ? 1 - fps.reloadT / fps.reloadMax : possessed.ammo / kit.mag})`;
+        el.classList.toggle('reload', rel); el.classList.toggle('low', !rel && possessed.ammo <= kit.mag * 0.25);
+      }
+    }
     const kit = KITS[possessed.type], cds = possessed.cds || [0, 0];
     const lab = (i, key) => {
       const b = $(i ? 'btnAbility2' : 'btnAbility');

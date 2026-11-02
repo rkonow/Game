@@ -540,3 +540,12 @@ button.big:hover { background: linear-gradient(180deg, #2a84c4, #1a5a8a); }
   #menu .ver { display: none; }
 }
 body.inMenu #hud { display: none; }
+#ammo { position: absolute; left: calc(50% + 150px); bottom: calc(10px + env(safe-area-inset-bottom)); display: none;
+  align-items: baseline; gap: 4px; color: #e8f6ff; font-family: Rajdhani, system-ui; text-shadow: 0 1px 3px #000; }
+body.fps #ammo { display: flex; }
+#ammo b { font-size: 34px; font-weight: 700; line-height: 1; }
+#ammo small { font-size: 15px; color: #9fb6c8; }
+#ammo i { position: absolute; left: 0; right: 0; bottom: -5px; height: 3px; background: #5fd0ff; transform-origin: left; }
+#ammo.low b { color: #ff8a6a; }
+#ammo.reload b { font-size: 16px; letter-spacing: .2em; color: #ffd36a; }
+@media (pointer: coarse) { #ammo { bottom: auto; left: auto; top: calc(96px + env(safe-area-inset-top)); right: 12px; } #ammo b { font-size: 24px; } }
