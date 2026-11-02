@@ -83,7 +83,11 @@ Win: hold all 3 relays to drop the hive's bio-shield, then destroy the hive. Los
 
 Physically based materials lit by a low alien sun and an environment map baked from the procedural sky; generated colour and normal maps for regolith, rock, metal plates and corrugated containers. Around the colony: drill rigs, a refinery, habitat domes, a crashed freighter, mesas and a ringed gas giant. Units march and scuttle, kick up dust, flinch when hit and tumble when killed; held relays get a light column.
 
-**Fancy** graphics add bloom, colour grading and a vignette through a post-processing pass (`vendor/jsm`, three.js r170 addons). The menu toggle switches between fancy and fast, and the game drops to fast by itself if the frame rate stays low. Add `?fancy=1` or `?fancy=0` to the URL to force a mode.
+Three graphics levels (menu toggle, saved): **Ultra** (default on desktop) adds ambient occlusion (GTAO), 4K shadows that follow the camera and denser ground detail; **Fancy** (default on phones) adds bloom, colour grading and a vignette through a post-processing pass (`vendor/jsm`, three.js r170 addons). The menu toggle switches between fancy and fast, and the game drops to fast by itself if the frame rate stays low. Add `?gfx=ultra|fancy|fast` to the URL to force a level.
+
+## Music
+
+An original soundtrack synthesized live with WebAudio (no audio files): a pad over a D-minor progression on the title screen, a pulsing bass and arpeggio in the field, and drums once aliens close in on your squad. Toggle it on the title screen.
 
 ## Code map
 

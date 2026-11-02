@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="inMenu">
 <canvas id="game"></canvas>
 <canvas id="overlay"></canvas>
 
@@ -75,10 +75,30 @@
   </div>
 </div>
 
-<div id="menu" class="screen">
+<div id="menu" class="screen title">
+  <div class="titleWrap">
+    <div class="logo">
+      <span class="pre">Kepler colony · 2291</span>
+      <h1>HIVE<em>FALL</em></h1>
+      <p class="tag">Command the squad. Drop into the fight.</p>
+    </div>
+    <nav class="mainNav">
+      <button id="btnCamp" class="nav primary"><b>Campaign</b><small>Story missions · your squad remembers</small></button>
+      <button id="btnStart" class="nav"><b>Live battle</b><small>Real-time skirmish against the swarm</small></button>
+      <button id="btnStartTac" class="nav"><b>Tactics</b><small>Plan, then 20-second live rounds</small></button>
+      <button id="btnHow" class="nav small"><b>How to play</b></button>
+      <div class="navRow">
+        <button id="btnGfx" class="gfx" title="Fancy adds glow and colour grading. Fast is smoother on older phones.">✨ Graphics: fancy</button>
+        <button id="btnMusic" class="gfx">♪ Music: on</button>
+      </div>
+    </nav>
+  </div>
+  <div class="ver">Prototype · original art and music, made in the browser</div>
+</div>
+
+<div id="how" class="screen hidden">
   <div class="card">
-    <h1>HIVEFALL</h1>
-    <p class="sub">Marines vs. the Swarm · Kepler Mining Colony</p>
+    <h1>HOW TO PLAY</h1>
     <p class="lead">The swarm's hive hides behind a bio-shield. Hold the three relays <b>A B C</b> in the middle to bring it down, then destroy the hive. <b>Only a marine you control in first person can capture a relay.</b></p>
     <div class="cols">
       <div>
@@ -101,12 +121,7 @@
       </div>
     </div>
     <p class="roles">Marine: frag grenade, combat roll, ★ drone swarm · Juggernaut: energy wall, shield charge, ★ shockwave · Ranger: scope, jump jet, ★ recon scan · Watch out for the <b>Hive Tyrant</b> · Alerts have a <b>Drop in</b> button that takes you straight there</p>
-    <div class="campCta"><button id="btnCamp" class="accent big">▶ Campaign</button><p>Five missions across the Kepler sector with a squad that remembers: marines earn rank, and the ones who fall are gone for good.</p></div>
-    <div class="modes">
-      <div><button id="btnStart" class="accent big">Live battle</button><p>Real-time: command and drop in whenever you like. The swarm attacks in waves.</p></div>
-      <div><button id="btnStartTac" class="accent big">Tactics</button><p>Turn-based: the battle pauses between 20-second live rounds. Reposition, deploy, upgrade and build turrets, then play one ★ hero live. Hold all 3 relays to break the shield, then destroy the hive.</p></div>
-    </div>
-    <button id="btnGfx" class="gfx" title="Fancy adds glow and colour grading. Fast is smoother on older phones.">✨ Graphics: fancy</button>
+    <button id="btnHowBack" class="accent big">Back</button>
   </div>
 </div>
 

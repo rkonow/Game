@@ -10,6 +10,7 @@ import { RenderPass } from '../vendor/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from '../vendor/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from '../vendor/jsm/postprocessing/ShaderPass.js';
+import { GTAOPass } from '../vendor/jsm/postprocessing/GTAOPass.js';
 
 // ---------------------------------------------------------------- config
 const HALF = 30;            // map spans [-HALF, HALF] on X and Z
@@ -133,14 +134,25 @@ scene.add(rim);
 
 // ---------------------------------------------------------------- post-processing: bloom + colour grade + vignette
 // "Fancy" graphics render through a composer. If the device can't keep up, it drops to plain rendering by itself.
-const gfx = { fancy: true, auto: true, slowT: 0, warm: 0 };
+// Three levels: fast (plain), fancy (bloom + grading), ultra (adds ambient occlusion, sharper shadows that follow the camera, more ground detail).
+const GFX_NAMES = ['⚡ Graphics: fast', '✨ Graphics: fancy', '💎 Graphics: ultra'];
+const gfx = { level: matchMedia('(pointer: coarse)').matches ? 1 : 2, fancy: true, auto: true, slowT: 0, warm: 0 };
 try {
-  const q = new URLSearchParams(location.search).get('fancy');
-  if (q !== null) { gfx.fancy = q !== '0'; gfx.auto = false; }
-  else if (localStorage.getItem('fowl.gfx') === 'fast') gfx.fancy = false;
+  const sp = new URLSearchParams(location.search), q = sp.get('fancy'), g = sp.get('gfx');
+  const saved = localStorage.getItem('hivefall.gfx');
+  if (g !== null) { gfx.level = Math.max(0, ['fast', 'fancy', 'ultra'].indexOf(g)); gfx.auto = false; }
+  else if (q !== null) { gfx.level = q === '0' ? 0 : 1; gfx.auto = false; }
+  else if (saved) gfx.level = Math.max(0, ['fast', 'fancy', 'ultra'].indexOf(saved));
 } catch (e) { /* storage blocked: keep defaults */ }
+gfx.fancy = gfx.level > 0;
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
 composer.addPass(new RenderPass(scene, camera));
+const aoPass = new GTAOPass(scene, camera, 256, 256);
+aoPass.output = GTAOPass.OUTPUT.Default;
+aoPass.blendIntensity = 0.85;
+aoPass.updateGtaoMaterial({ radius: 0.7, distanceExponent: 1.6, thickness: 1.2, scale: 1.1, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
+aoPass.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+composer.addPass(aoPass);
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.45, 0.92);
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
@@ -162,20 +174,44 @@ const gradePass = new ShaderPass({
     }`,
 });
 composer.addPass(gradePass);
-function setFancy(on, why, save = true) {
-  gfx.fancy = on;
-  if (save) try { localStorage.setItem('fowl.gfx', on ? 'fancy' : 'fast'); } catch (e) { /* ignore */ }
-  const b = document.getElementById('btnGfx'); if (b) b.textContent = on ? '✨ Graphics: fancy' : '⚡ Graphics: fast';
+function setGfx(level, why, save = true) {
+  gfx.level = level; gfx.fancy = level > 0;
+  aoPass.enabled = level === 2;
+  if (save) try { localStorage.setItem('hivefall.gfx', ['fast', 'fancy', 'ultra'][level]); } catch (e) { /* ignore */ }
+  const b = document.getElementById('btnGfx'); if (b) b.textContent = GFX_NAMES[level];
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, level === 2 ? 2 : 1.75));
+  const ms = level === 2 ? 4096 : 2048; // sharper shadows on ultra
+  if (sun.shadow.mapSize.x !== ms) { sun.shadow.mapSize.set(ms, ms); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+  if (typeof groundDetail !== 'undefined') groundDetail(level);
+  if (typeof resize === 'function' && renderer.domElement.width) resize();
   if (why) toast(why, 2.5);
 }
+const setFancy = (on, why, save) => setGfx(on ? Math.max(1, gfx.level) : 0, why, save);
+// the sun's shadow box follows what you're looking at, snapped to its texels so shadows don't shimmer
+scene.add(sun.target);
+function followShadows() {
+  const c = mode === 'fps' && possessed ? possessed : mode === 'menu' ? { x: 4, z: 6 } : rts.focus;
+  const half = gfx.level === 2 ? (mode === 'fps' ? 24 : 34) : 40;
+  const cam = sun.shadow.camera;
+  if (cam.right !== half) { Object.assign(cam, { left: -half, right: half, top: half, bottom: -half }); cam.updateProjectionMatrix(); }
+  const texel = (half * 2) / sun.shadow.mapSize.x * 4;
+  const x = Math.round(c.x / texel) * texel, z = Math.round(c.z / texel) * texel;
+  sun.target.position.set(x, 0, z);
+  sun.position.set(x + SUN_DIR.x * 60, SUN_DIR.y * 60, z + SUN_DIR.z * 60);
+}
 function renderFrame(dt) {
+  followShadows();
   if (!gfx.fancy) { renderer.render(scene, camera); return; }
   composer.render(dt);
-  // too slow for a few seconds in game? fall back to fast graphics
+  // too slow for a few seconds in game? step down a graphics level
   if (gfx.auto && mode !== 'menu') {
     gfx.warm += dt;
     if (gfx.warm > 3) { gfx.slowT = dt > 0.042 ? gfx.slowT + dt : Math.max(0, gfx.slowT - dt * 2); }
-    if (gfx.slowT > 4) { gfx.auto = false; setFancy(false, 'Switched to fast graphics for a smoother game', false); }
+    if (gfx.slowT > 4) {
+      gfx.slowT = 0; gfx.warm = 0;
+      if (gfx.level === 2) setGfx(1, 'Switched to fancy graphics for a smoother game', false);
+      else { gfx.auto = false; setGfx(0, 'Switched to fast graphics for a smoother game', false); }
+    }
   }
 }
 
@@ -302,6 +338,53 @@ function rockGeo(seed, detail = 1) { // a lumpy boulder
   return g;
 }
 const rockMat = toon({ map: rockTex.col, normalMap: rockTex.nrm, roughness: 0.92, metalness: 0.05, flatShading: true });
+// ground detail: thousands of instanced pebbles and alien spike-plants (fewer on lower graphics levels)
+const detail = {};
+{
+  const rnd = (() => { let x = 1234567; return () => ((x = (x * 16807) % 2147483647) / 2147483647); })();
+  const pebGeo = rockGeo(91, 0); pebGeo.scale(0.12, 0.08, 0.12);
+  const pebMat = toon({ color: 0x8a6a58, roughness: 0.95, metalness: 0.02, flatShading: true });
+  const MAXP = 5000;
+  const peb = new THREE.InstancedMesh(pebGeo, pebMat, MAXP);
+  const d = new THREE.Object3D(), col = new THREE.Color();
+  for (let i = 0; i < MAXP; i++) {
+    const r = Math.sqrt(rnd()) * 70, a = rnd() * Math.PI * 2;
+    d.position.set(Math.cos(a) * r, 0.02, Math.sin(a) * r);
+    d.rotation.set(rnd() * 3, rnd() * 6, rnd() * 3);
+    d.scale.setScalar(0.3 + Math.pow(rnd(), 4) * 2.2);
+    d.updateMatrix(); peb.setMatrixAt(i, d.matrix);
+    peb.setColorAt(i, col.setHSL(0.05 + rnd() * 0.03, 0.35 + rnd() * 0.2, 0.42 + rnd() * 0.25));
+  }
+  peb.receiveShadow = true; peb.raycast = () => {};
+  scene.add(peb);
+  // alien plants: a cluster of thin dark spikes with glowing tips
+  const spike = new THREE.ConeGeometry(0.035, 0.55, 5); spike.translate(0, 0.27, 0);
+  const tip = new THREE.SphereGeometry(0.03, 6, 4); tip.translate(0, 0.56, 0);
+  const plantMat = toon({ color: 0x3a2a3e, roughness: 0.6, metalness: 0.1 });
+  const tipMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.5, 1.6, 1.3) });
+  const MAXS = 2400;
+  const sp = new THREE.InstancedMesh(spike, plantMat, MAXS), tp = new THREE.InstancedMesh(tip, tipMat, MAXS);
+  let n = 0;
+  while (n < MAXS) {
+    const r = 8 + Math.sqrt(rnd()) * 60, a = rnd() * Math.PI * 2, cx = Math.cos(a) * r, cz = Math.sin(a) * r;
+    if (Math.abs(cx) < 30 && Math.abs(cz) < 30 && rnd() < 0.6) continue; // thinner inside the battlefield
+    const k = 4 + Math.floor(rnd() * 6), sc = 0.6 + rnd() * 1.2;
+    for (let j = 0; j < k && n < MAXS; j++, n++) {
+      d.position.set(cx + (rnd() - 0.5) * 0.5, 0, cz + (rnd() - 0.5) * 0.5);
+      d.rotation.set((rnd() - 0.5) * 0.9, rnd() * 6, (rnd() - 0.5) * 0.9);
+      d.scale.set(sc, sc * (0.6 + rnd() * 0.9), sc);
+      d.updateMatrix(); sp.setMatrixAt(n, d.matrix); tp.setMatrixAt(n, d.matrix);
+    }
+  }
+  sp.castShadow = true; sp.raycast = tp.raycast = () => {};
+  scene.add(sp, tp);
+  Object.assign(detail, { peb, sp, tp, MAXP, MAXS });
+}
+function groundDetail(level) {
+  const kP = [0.3, 0.6, 1][level], kS = [0.35, 0.65, 1][level];
+  detail.peb.count = Math.round(detail.MAXP * kP);
+  detail.sp.count = detail.tp.count = Math.round(detail.MAXS * kS);
+}
 const ambient = { embers: null, drills: [], beacons: [], dropship: null, smokeT: 0 };
 const smokeSpots = [];
 const LANDMARKS = [[-46, -42, 10], [46, -44, 9], [48, 40, 11], [-50, 44, 9], [0, -56, 14], [-60, 0, 8], [60, 4, 8]];
@@ -1222,6 +1305,7 @@ function updateEffects(dt) {
 // ---------------------------------------------------------------- audio (tiny procedural sfx)
 let audio = null, noiseBuf = null;
 function initAudio() {
+  if (audio) return; // one context for the whole page (sound effects and music share it)
   try {
     audio = new (window.AudioContext || window.webkitAudioContext)();
     noiseBuf = audio.createBuffer(1, audio.sampleRate * 0.8, audio.sampleRate);
@@ -2283,6 +2367,16 @@ function rtsPose() {
   dummy.lookAt(rts.focus);
   return { pos: dummy.position.clone(), quat: dummy.quaternion.clone(), fov: 50 };
 }
+// title screen: a slow cinematic dolly behind the squad, looking out at the hive under the alien sky
+const menuLook = new THREE.Vector3();
+function menuPose() {
+  const t = performance.now() / 1000;
+  const a = Math.sin(t * 0.05) * 0.5;
+  dummy.position.set(Math.sin(a) * 6 + 13, 3.4 + Math.sin(t * 0.13) * 0.4, 20 + Math.cos(a) * 2);
+  menuLook.set(Math.sin(a) * 3 - 3, 2.4, -16);
+  dummy.lookAt(menuLook);
+  return { pos: dummy.position.clone(), quat: dummy.quaternion.clone(), fov: 46 };
+}
 const euler = new THREE.Euler(0, 0, 0, 'YXZ');
 function fpsPose() {
   const u = possessed;
@@ -2297,6 +2391,7 @@ function setMode(m, arc = 0) {
   const prev = mode;
   mode = m;
   document.body.classList.toggle('fps', m === 'fps');
+  document.body.classList.toggle('inMenu', m === 'menu');
   viewmodel.visible = m === 'fps' && !fps.scoped;
   amoveArmed = false;
   const tag = $('modeTag');
@@ -2321,7 +2416,7 @@ function updateCamera(dt) {
     rts.focus.x = Math.max(-HALF, Math.min(HALF, rts.focus.x));
     rts.focus.z = Math.max(-HALF, Math.min(HALF, rts.focus.z));
   }
-  const pose = mode === 'fps' && possessed ? fpsPose() : rtsPose();
+  const pose = mode === 'fps' && possessed ? fpsPose() : mode === 'menu' ? menuPose() : rtsPose();
   if (trans) {
     trans.t += dt;
     const k = Math.min(1, trans.t / trans.dur);
@@ -2664,8 +2759,9 @@ tapButton($('btnBuyHeavy'), () => buy('heavy'));
 tapButton($('btnBuySniper'), () => buy('sniper'));
 tapButton($('btnStart'), startGame);
 tapButton($('btnStartTac'), startTactics);
-tapButton($('btnGfx'), () => { gfx.auto = false; setFancy(!gfx.fancy); });
-setFancy(gfx.fancy, null, false);
+tapButton($('btnGfx'), () => { gfx.auto = false; setGfx((gfx.level + 1) % 3); });
+for (const t of [groundTex.col, groundTex.nrm, plateTex.col, rockTex.col]) { t.anisotropy = renderer.capabilities.getMaxAnisotropy(); t.needsUpdate = true; } // crisp ground at grazing angles
+setGfx(gfx.level, null, false);
 tapButton($('btnHold'), holdSelected);
 tapButton($('btnBomb'), () => setTool(tac.tool === 'bomb' ? 'move' : 'bomb'));
 tapButton($('btnHero'), heroFromSelection);
@@ -3450,6 +3546,8 @@ $('campBrief').addEventListener('click', e => {
   renderCampaign();
 });
 tapButton($('btnCamp'), openCampaign);
+tapButton($('btnHow'), () => { $('menu').classList.add('hidden'); $('how').classList.remove('hidden'); });
+tapButton($('btnHowBack'), () => { $('how').classList.add('hidden'); $('menu').classList.remove('hidden'); });
 tapButton($('btnCampBack'), () => { $('camp').classList.add('hidden'); $('menu').classList.remove('hidden'); });
 tapButton($('btnCampReset'), () => {
   if (!confirm('Start a new campaign? Your squad and progress will be lost.')) return;
@@ -3698,6 +3796,123 @@ function storyOverlay() {
   const txt = `▼ ${mk.name.toUpperCase()} · ${d}m`;
   octx.strokeText(txt, sp.x, sp.y); octx.fillStyle = '#7fe0ff'; octx.fillText(txt, sp.x, sp.y);
 }
+
+// ---------------------------------------------------------------- music: an original soundtrack synthesized live with WebAudio
+// Three layers over one chord progression: a pad (always), a pulsing bass + arpeggio (when the squad is in the field),
+// and drums + a lead stab (when fighting). Layers cross-fade with the intensity of the battle.
+const music = { on: true, started: false, step: 0, next: 0, bus: null, layers: null, intensity: 0, target: 0, timer: null };
+try { music.on = localStorage.getItem('hivefall.music') !== 'off'; } catch (e) { /* default on */ }
+const BPM = 92, SIXTEENTH = 60 / BPM / 4;
+// D minor, dark and wide: Dm - Bb - F - C, then Dm - Gm - Bb - A (the A major chord adds tension at the turn)
+const CHORDS = [[50, 53, 57], [46, 50, 53], [41, 45, 48], [48, 52, 55], [50, 53, 57], [43, 46, 50], [46, 50, 53], [45, 49, 52]];
+const mtof = n => 440 * Math.pow(2, (n - 69) / 12);
+function musicStart() {
+  if (!audio || music.started) return;
+  music.started = true;
+  const comp = audio.createDynamicsCompressor(); comp.threshold.value = -18; comp.ratio.value = 3;
+  const master = audio.createGain(); master.gain.value = music.on ? 0.55 : 0;
+  // a simple feedback delay gives the synths space
+  const delay = audio.createDelay(1); delay.delayTime.value = SIXTEENTH * 3;
+  const fb = audio.createGain(); fb.gain.value = 0.32;
+  const wet = audio.createGain(); wet.gain.value = 0.28;
+  const damp = audio.createBiquadFilter(); damp.type = 'lowpass'; damp.frequency.value = 2200;
+  delay.connect(damp); damp.connect(fb); fb.connect(delay); damp.connect(wet); wet.connect(master);
+  master.connect(comp); comp.connect(audio.destination);
+  const layer = v => { const g = audio.createGain(); g.gain.value = v; g.connect(master); g.connect(delay); return g; };
+  music.bus = master; music.delay = delay;
+  music.layers = { pad: layer(0.5), pulse: layer(0), drums: layer(0) };
+  music.next = audio.currentTime + 0.1;
+  music.timer = setInterval(musicSchedule, 60);
+}
+function musicSetOn(on) {
+  music.on = on;
+  try { localStorage.setItem('hivefall.music', on ? 'on' : 'off'); } catch (e) { /* ignore */ }
+  const b = $('btnMusic'); if (b) b.textContent = on ? '♪ Music: on' : '♪ Music: off';
+  if (music.bus) music.bus.gain.setTargetAtTime(on ? 0.55 : 0, audio.currentTime, 0.3);
+}
+function musicSchedule() {
+  if (!audio || audio.state !== 'running') return;
+  // battle intensity: 0 on the title screen, 1 in the field, 2 when aliens are close to your marines
+  let target = 0;
+  if (mode === 'rts' || mode === 'fps') {
+    target = 1;
+    const mine = playerUnits();
+    if (entities.some(e => !e.dead && e.team === ENEMY && !e.isBase && mine.some(u => Math.hypot(u.x - e.x, u.z - e.z) < 16))) target = 2;
+    if (tac.on && tac.phase === 'plan') target = 1;
+  }
+  if (mode === 'over') target = 0;
+  music.target = target;
+  music.intensity += (target - music.intensity) * 0.04;
+  const L = music.layers, now = audio.currentTime, k = music.intensity;
+  L.pad.gain.setTargetAtTime(0.5 - Math.max(0, k - 1) * 0.15, now, 0.5);
+  L.pulse.gain.setTargetAtTime(Math.min(1, k) * 0.45, now, 0.8);
+  L.drums.gain.setTargetAtTime(Math.max(0, k - 1) * 0.7, now, 0.6);
+  while (music.next < now + 0.25) { musicStep(music.step, music.next); music.step++; music.next += SIXTEENTH; }
+}
+function musicStep(i, t) {
+  const bar = Math.floor(i / 16) % CHORDS.length, s = i % 16, chord = CHORDS[bar];
+  const L = music.layers;
+  if (s === 0) for (const n of chord) padNote(mtof(n), t, SIXTEENTH * 16, L.pad);
+  if (s === 0 && bar % 2 === 0) padNote(mtof(chord[0] - 12), t, SIXTEENTH * 32, L.pad, 0.6);
+  // pulse: driving 8th-note bass and a glassy arpeggio on top
+  if (music.intensity > 0.05) {
+    if (s % 2 === 0) bassNote(mtof(chord[0] - 12 + (s === 10 ? 7 : 0)), t, SIXTEENTH * 1.8, L.pulse);
+    if (s % 3 === 0) bellNote(mtof(chord[(s / 3) % 3] + 12 + (s > 8 ? 12 : 0)), t, L.pulse);
+  }
+  // drums only when the fight is on
+  if (music.intensity > 1.05) {
+    if (s === 0 || s === 6 || s === 10) kick(t, L.drums);
+    if (s === 4 || s === 12) snare(t, L.drums);
+    if (s % 2 === 1) hat(t, L.drums, s % 4 === 3 ? 0.5 : 0.3);
+    if (s === 14 && bar % 2 === 1) stab(chord.map(n => mtof(n + 12)), t, L.drums);
+  }
+}
+function voice(type, freq, t, dur, out, gain, a = 0.01, r = 0.2, cutoff = 4000, detune = 0) {
+  const o = audio.createOscillator(); o.type = type; o.frequency.value = freq; o.detune.value = detune;
+  const f = audio.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; f.Q.value = 2;
+  const g = audio.createGain(); g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain, t + a); g.gain.setValueAtTime(gain, t + Math.max(a, dur - r));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(f); f.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.05);
+  return f;
+}
+function padNote(freq, t, dur, out, v = 1) {
+  for (const d of [-9, 0, 8]) {
+    const f = voice('sawtooth', freq, t, dur, out, 0.035 * v, dur * 0.35, dur * 0.4, 900, d);
+    f.frequency.setValueAtTime(500, t); f.frequency.linearRampToValueAtTime(1400, t + dur * 0.5); f.frequency.linearRampToValueAtTime(600, t + dur);
+  }
+}
+function bassNote(freq, t, dur, out) {
+  const f = voice('sawtooth', freq, t, dur, out, 0.16, 0.005, 0.08, 700);
+  f.frequency.setValueAtTime(1600, t); f.frequency.exponentialRampToValueAtTime(220, t + dur);
+  voice('square', freq / 2, t, dur, out, 0.06, 0.005, 0.08, 300);
+}
+function bellNote(freq, t, out) { voice('triangle', freq, t, 0.5, out, 0.07, 0.003, 0.45, 6000); voice('sine', freq * 2.01, t, 0.3, out, 0.025, 0.002, 0.28); }
+function kick(t, out) {
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.18);
+  g.gain.setValueAtTime(0.9, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+  o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.4);
+}
+function noiseHit(t, out, type, freq, dur, vol) {
+  const src = audio.createBufferSource(); src.buffer = noiseBuf;
+  const f = audio.createBiquadFilter(); f.type = type; f.frequency.value = freq;
+  const g = audio.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  src.connect(f); f.connect(g); g.connect(out); src.start(t); src.stop(t + dur + 0.02);
+}
+function snare(t, out) { noiseHit(t, out, 'bandpass', 1800, 0.22, 0.5); voice('triangle', 190, t, 0.12, out, 0.18, 0.002, 0.1); }
+function hat(t, out, v) { noiseHit(t, out, 'highpass', 7000, 0.05, v * 0.4); }
+function stab(freqs, t, out) { for (const f of freqs) voice('square', f, t, 0.18, out, 0.03, 0.004, 0.12, 2500); }
+// browsers only allow sound after the first tap or key press: start the soundtrack then
+function firstGesture() {
+  initAudio();
+  if (audio && audio.state === 'suspended') audio.resume();
+  musicStart();
+}
+addEventListener('pointerdown', firstGesture, { capture: true });
+addEventListener('keydown', firstGesture, { capture: true });
+tapButton($('btnMusic'), () => { firstGesture(); musicSetOn(!music.on); });
+musicSetOn(music.on);
 
 setupWorld();
 let last = performance.now();
