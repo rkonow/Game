@@ -3931,30 +3931,36 @@ function storyOverlay() {
   octx.strokeText(txt, sp.x, sp.y); octx.fillStyle = '#7fe0ff'; octx.fillText(txt, sp.x, sp.y);
 }
 
-// ---------------------------------------------------------------- music: an original soundtrack synthesized live with WebAudio
-// Three layers over one chord progression: a pad (always), a pulsing bass + arpeggio (when the squad is in the field),
-// and drums + a lead stab (when fighting). Layers cross-fade with the intensity of the battle.
+// ---------------------------------------------------------------- music: a dark cinematic score, synthesized live with WebAudio
+// Layers over a slow minor progression: a low drone and string ensemble (always), a pulsing low ostinato with distant
+// pings (in the field), and war drums with brass swells (when aliens close in). Layers cross-fade with the battle.
 const music = { on: true, started: false, step: 0, next: 0, bus: null, layers: null, intensity: 0, target: 0, timer: null };
 try { music.on = localStorage.getItem('hivefall.music') !== 'off'; } catch (e) { /* default on */ }
-const BPM = 92, SIXTEENTH = 60 / BPM / 4;
-// D minor, dark and wide: Dm - Bb - F - C, then Dm - Gm - Bb - A (the A major chord adds tension at the turn)
-const CHORDS = [[50, 53, 57], [46, 50, 53], [41, 45, 48], [48, 52, 55], [50, 53, 57], [43, 46, 50], [46, 50, 53], [45, 49, 52]];
+const BPM = 70, SIXTEENTH = 60 / BPM / 4, BAR = SIXTEENTH * 16;
+// D minor, two bars per chord: Dm(add9) - Bbmaj7 - Gm - Asus4/A
+const CHORDS = [[38, 50, 53, 57, 64], [34, 50, 53, 57, 58], [31, 50, 55, 58, 62], [33, 50, 52, 57, 61]];
 const mtof = n => 440 * Math.pow(2, (n - 69) / 12);
 function musicStart() {
   if (!audio || music.started) return;
   music.started = true;
-  const comp = audio.createDynamicsCompressor(); comp.threshold.value = -18; comp.ratio.value = 3;
-  const master = audio.createGain(); master.gain.value = music.on ? 0.55 : 0;
-  // a simple feedback delay gives the synths space
-  const delay = audio.createDelay(1); delay.delayTime.value = SIXTEENTH * 3;
-  const fb = audio.createGain(); fb.gain.value = 0.32;
-  const wet = audio.createGain(); wet.gain.value = 0.28;
-  const damp = audio.createBiquadFilter(); damp.type = 'lowpass'; damp.frequency.value = 2200;
-  delay.connect(damp); damp.connect(fb); fb.connect(delay); damp.connect(wet); wet.connect(master);
+  const comp = audio.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 3;
+  const master = audio.createGain(); master.gain.value = music.on ? 0.6 : 0;
+  // a long hall reverb (generated) makes the synths sound like an orchestra in a big space
+  const len = audio.sampleRate * 3.5, ir = audio.createBuffer(2, len, audio.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2) * (i < 800 ? i / 800 : 1); }
+  const hall = audio.createConvolver(); hall.buffer = ir;
+  const wet = audio.createGain(); wet.gain.value = 0.55; hall.connect(wet); wet.connect(master);
   master.connect(comp); comp.connect(audio.destination);
-  const layer = v => { const g = audio.createGain(); g.gain.value = v; g.connect(master); g.connect(delay); return g; };
-  music.bus = master; music.delay = delay;
-  music.layers = { pad: layer(0.5), pulse: layer(0), drums: layer(0) };
+  const layer = (v, send) => { const g = audio.createGain(); g.gain.value = v; g.connect(master); const s = audio.createGain(); s.gain.value = send; g.connect(s); s.connect(hall); return g; };
+  music.bus = master;
+  music.layers = { strings: layer(0.5, 0.8), pulse: layer(0, 0.6), drums: layer(0, 0.35) };
+  // the drone runs continuously: two detuned low saws with a slowly breathing filter
+  const droneF = audio.createBiquadFilter(); droneF.type = 'lowpass'; droneF.frequency.value = 220; droneF.Q.value = 3;
+  const lfo = audio.createOscillator(), lfoG = audio.createGain(); lfo.frequency.value = 0.05; lfoG.gain.value = 120; lfo.connect(lfoG); lfoG.connect(droneF.frequency); lfo.start();
+  const droneG = audio.createGain(); droneG.gain.value = 0.18; droneF.connect(droneG); droneG.connect(music.layers.strings);
+  for (const d of [-6, 5]) { const o = audio.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(26); o.detune.value = d; o.connect(droneF); o.start(); }
+  const sub = audio.createOscillator(); sub.frequency.value = mtof(26); const subG = audio.createGain(); subG.gain.value = 0.12; sub.connect(subG); subG.connect(music.layers.strings); sub.start();
+  music.drone = { osc: [sub] };
   music.next = audio.currentTime + 0.1;
   music.timer = setInterval(musicSchedule, 60);
 }
@@ -3962,11 +3968,10 @@ function musicSetOn(on) {
   music.on = on;
   try { localStorage.setItem('hivefall.music', on ? 'on' : 'off'); } catch (e) { /* ignore */ }
   const b = $('btnMusic'); if (b) b.textContent = on ? '♪ Music: on' : '♪ Music: off';
-  if (music.bus) music.bus.gain.setTargetAtTime(on ? 0.55 : 0, audio.currentTime, 0.3);
+  if (music.bus) music.bus.gain.setTargetAtTime(on ? 0.6 : 0, audio.currentTime, 0.4);
 }
 function musicSchedule() {
   if (!audio || audio.state !== 'running') return;
-  // battle intensity: 0 on the title screen, 1 in the field, 2 when aliens are close to your marines
   let target = 0;
   if (mode === 'rts' || mode === 'fps') {
     target = 1;
@@ -3976,67 +3981,81 @@ function musicSchedule() {
   }
   if (mode === 'over') target = 0;
   music.target = target;
-  music.intensity += (target - music.intensity) * 0.04;
+  music.intensity += (target - music.intensity) * 0.03;
   const L = music.layers, now = audio.currentTime, k = music.intensity;
-  L.pad.gain.setTargetAtTime(0.5 - Math.max(0, k - 1) * 0.15, now, 0.5);
-  L.pulse.gain.setTargetAtTime(Math.min(1, k) * 0.45, now, 0.8);
-  L.drums.gain.setTargetAtTime(Math.max(0, k - 1) * 0.7, now, 0.6);
-  while (music.next < now + 0.25) { musicStep(music.step, music.next); music.step++; music.next += SIXTEENTH; }
+  L.strings.gain.setTargetAtTime(0.5 + Math.max(0, k - 1) * 0.15, now, 0.8);
+  L.pulse.gain.setTargetAtTime(Math.min(1, k) * 0.5, now, 1.2);
+  L.drums.gain.setTargetAtTime(Math.max(0, k - 1) * 0.85, now, 0.8);
+  while (music.next < now + 0.3) { musicStep(music.step, music.next); music.step++; music.next += SIXTEENTH; }
 }
 function musicStep(i, t) {
-  const bar = Math.floor(i / 16) % CHORDS.length, s = i % 16, chord = CHORDS[bar];
+  const bar = Math.floor(i / 16), s = i % 16, chord = CHORDS[Math.floor(bar / 2) % CHORDS.length];
   const L = music.layers;
-  if (s === 0) for (const n of chord) padNote(mtof(n), t, SIXTEENTH * 16, L.pad);
-  if (s === 0 && bar % 2 === 0) padNote(mtof(chord[0] - 12), t, SIXTEENTH * 32, L.pad, 0.6);
-  // pulse: driving 8th-note bass and a glassy arpeggio on top
+  if (s === 0 && bar % 2 === 0) { // strings: a slow swell over two bars
+    chord.slice(1).forEach((n, k) => strings(mtof(n), t + k * 0.05, BAR * 2.05, L.strings, k === chord.length - 2 ? 0.6 : 1));
+    strings(mtof(chord[0] + 12), t, BAR * 2.05, L.strings, 0.9);
+  }
   if (music.intensity > 0.05) {
-    if (s % 2 === 0) bassNote(mtof(chord[0] - 12 + (s === 10 ? 7 : 0)), t, SIXTEENTH * 1.8, L.pulse);
-    if (s % 3 === 0) bellNote(mtof(chord[(s / 3) % 3] + 12 + (s > 8 ? 12 : 0)), t, L.pulse);
+    if (s % 2 === 0) ostinato(mtof(chord[0] + (s === 8 || s === 14 ? 12 : 0)), t, L.pulse);
+    if (s === 6 && bar % 2 === 1) sonarPing(mtof(chord[2 + (bar % 3)] + 12), t, L.pulse);
   }
-  // drums only when the fight is on
-  if (music.intensity > 1.05) {
-    if (s === 0 || s === 6 || s === 10) kick(t, L.drums);
-    if (s === 4 || s === 12) snare(t, L.drums);
-    if (s % 2 === 1) hat(t, L.drums, s % 4 === 3 ? 0.5 : 0.3);
-    if (s === 14 && bar % 2 === 1) stab(chord.map(n => mtof(n + 12)), t, L.drums);
+  if (music.intensity > 1.05) { // war drums and brass
+    if (s === 0 || s === 3 || s === 8 || (s === 11 && bar % 2) || (s === 14 && bar % 4 === 3)) taiko(t, L.drums, s === 0 ? 1 : 0.7);
+    if (s === 4 || s === 12) rimShot(t, L.drums);
+    if (s === 0 && bar % 2 === 0) brass(chord.slice(0, 3).map(n => mtof(n + 12)), t, L.drums);
   }
 }
-function voice(type, freq, t, dur, out, gain, a = 0.01, r = 0.2, cutoff = 4000, detune = 0) {
-  const o = audio.createOscillator(); o.type = type; o.frequency.value = freq; o.detune.value = detune;
-  const f = audio.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; f.Q.value = 2;
-  const g = audio.createGain(); g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(gain, t + a); g.gain.setValueAtTime(gain, t + Math.max(a, dur - r));
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(f); f.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.05);
-  return f;
+function env(g, t, a, hold, r, peak) {
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + a);
+  g.gain.setValueAtTime(peak, t + a + hold); g.gain.exponentialRampToValueAtTime(0.0001, t + a + hold + r);
 }
-function padNote(freq, t, dur, out, v = 1) {
-  for (const d of [-9, 0, 8]) {
-    const f = voice('sawtooth', freq, t, dur, out, 0.035 * v, dur * 0.35, dur * 0.4, 900, d);
-    f.frequency.setValueAtTime(500, t); f.frequency.linearRampToValueAtTime(1400, t + dur * 0.5); f.frequency.linearRampToValueAtTime(600, t + dur);
+function strings(freq, t, dur, out, v = 1) {
+  const g = audio.createGain(); env(g, t, dur * 0.35, dur * 0.3, dur * 0.35, 0.022 * v);
+  const f = audio.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1100; f.Q.value = 0.5;
+  const vib = audio.createOscillator(), vibG = audio.createGain(); vib.frequency.value = 4.8 + Math.random(); vibG.gain.value = 5; vib.connect(vibG);
+  for (const d of [-11, -3, 4, 12]) {
+    const o = audio.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq; o.detune.value = d; vibG.connect(o.detune);
+    o.connect(f); o.start(t); o.stop(t + dur + 0.1);
+  }
+  vib.start(t); vib.stop(t + dur + 0.1);
+  f.connect(g); g.connect(out);
+}
+function ostinato(freq, t, out) {
+  const o = audio.createOscillator(), f = audio.createBiquadFilter(), g = audio.createGain();
+  o.type = 'sawtooth'; o.frequency.value = freq; f.type = 'lowpass'; f.Q.value = 6;
+  f.frequency.setValueAtTime(900, t); f.frequency.exponentialRampToValueAtTime(140, t + 0.18);
+  env(g, t, 0.005, 0.05, 0.14, 0.09);
+  o.connect(f); f.connect(g); g.connect(out); o.start(t); o.stop(t + 0.25);
+}
+function sonarPing(freq, t, out) { // a distant metallic ping, like sonar in a cave
+  for (const [m, v] of [[1, 0.05], [2.76, 0.015], [5.4, 0.008]]) {
+    const o = audio.createOscillator(), g = audio.createGain(); o.type = 'sine'; o.frequency.value = freq * m;
+    env(g, t, 0.003, 0.02, 1.8, v); o.connect(g); g.connect(out); o.start(t); o.stop(t + 2);
   }
 }
-function bassNote(freq, t, dur, out) {
-  const f = voice('sawtooth', freq, t, dur, out, 0.16, 0.005, 0.08, 700);
-  f.frequency.setValueAtTime(1600, t); f.frequency.exponentialRampToValueAtTime(220, t + dur);
-  voice('square', freq / 2, t, dur, out, 0.06, 0.005, 0.08, 300);
-}
-function bellNote(freq, t, out) { voice('triangle', freq, t, 0.5, out, 0.07, 0.003, 0.45, 6000); voice('sine', freq * 2.01, t, 0.3, out, 0.025, 0.002, 0.28); }
-function kick(t, out) {
+function taiko(t, out, v) {
   const o = audio.createOscillator(), g = audio.createGain();
-  o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.18);
-  g.gain.setValueAtTime(0.9, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
-  o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.4);
+  o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.35);
+  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+  o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.65);
+  const src = audio.createBufferSource(); src.buffer = noiseBuf; const f = audio.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 600;
+  const ng = audio.createGain(); ng.gain.setValueAtTime(v * 0.5, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+  src.connect(f); f.connect(ng); ng.connect(out); src.start(t); src.stop(t + 0.25);
 }
-function noiseHit(t, out, type, freq, dur, vol) {
-  const src = audio.createBufferSource(); src.buffer = noiseBuf;
-  const f = audio.createBiquadFilter(); f.type = type; f.frequency.value = freq;
-  const g = audio.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  src.connect(f); f.connect(g); g.connect(out); src.start(t); src.stop(t + dur + 0.02);
+function rimShot(t, out) {
+  const src = audio.createBufferSource(); src.buffer = noiseBuf; const f = audio.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2500; f.Q.value = 3;
+  const g = audio.createGain(); g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+  src.connect(f); f.connect(g); g.connect(out); src.start(t); src.stop(t + 0.1);
 }
-function snare(t, out) { noiseHit(t, out, 'bandpass', 1800, 0.22, 0.5); voice('triangle', 190, t, 0.12, out, 0.18, 0.002, 0.1); }
-function hat(t, out, v) { noiseHit(t, out, 'highpass', 7000, 0.05, v * 0.4); }
-function stab(freqs, t, out) { for (const f of freqs) voice('square', f, t, 0.18, out, 0.03, 0.004, 0.12, 2500); }
+function brass(freqs, t, out) { // a low swelling brass chord
+  for (const fr of freqs) {
+    const o = audio.createOscillator(), f = audio.createBiquadFilter(), g = audio.createGain();
+    o.type = 'sawtooth'; o.frequency.value = fr / 2; f.type = 'lowpass'; f.Q.value = 1;
+    f.frequency.setValueAtTime(200, t); f.frequency.linearRampToValueAtTime(1400, t + 0.9); f.frequency.linearRampToValueAtTime(300, t + 2.4);
+    env(g, t, 0.8, 0.6, 1.2, 0.05);
+    o.connect(f); f.connect(g); g.connect(out); o.start(t); o.stop(t + 2.7);
+  }
+}
 // browsers only allow sound after the first tap or key press: start the soundtrack then
 function firstGesture() {
   initAudio();
