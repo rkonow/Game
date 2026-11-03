@@ -674,6 +674,8 @@ const playerPointCount = () => points.filter(p => p.owner === PLAYER).length;
 // ---------------------------------------------------------------- entities: marines vs the swarm
 let entities = [];
 const teamMats = TEAM_COLORS.map(c => toon({ color: c, roughness: 0.45, metalness: 0.4 }));
+const teamGlow = TEAM_COLORS.map(c => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 1.6, roughness: 0.3 }));
+const MARINE_STYLE = (new URLSearchParams(location.search).get('marine') || 'classic').toLowerCase();
 const darkMat = toon({ color: 0x353b44, roughness: 0.4, metalness: 0.55 });   // gunmetal
 const goldMat = toon({ color: 0x5a2a7a, emissive: 0x6a1aa0, emissiveIntensity: 0.6, roughness: 0.25, metalness: 0.3 }); // tyrant carapace
 const visorMat = new THREE.MeshStandardMaterial({ color: 0x0a1a24, emissive: 0x38c8ff, emissiveIntensity: 1.8, roughness: 0.1, metalness: 0.6 });
@@ -698,6 +700,7 @@ const prec = m => { m.userData.prec = true; return m; }; // a precision (crit) s
 function blob(mat, sx, sy, sz, x, y, z) {
   const m = new THREE.Mesh(sphere, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); return m;
 }
+function rbox(mat, args, x, y, z) { const m = new THREE.Mesh(new RoundedBoxGeometry(...args), mat); m.position.set(x, y, z); return m; }
 function box(mat, w, h, d, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); return m;
 }
@@ -723,12 +726,42 @@ function buildMarine(u, g, type, team) {
   up.add(box(darkMat, 0.44 * big, 0.08, 0.28 * big, 0, 0.08, 0));
   up.add(box(armor, 0.34 * big, 0.42, 0.18, 0, 0.38, 0.24 * big));
   if (type === 'sniper') { const cloak = box(toon({ color: 0x7a6a52, roughness: 0.95, metalness: 0 }), 0.46, 0.5, 0.05, 0, 0.3, 0.36); cloak.rotation.x = 0.15; up.add(cloak); }
-  // shoulder pads in team colour
-  for (const s of [-1, 1]) { const pad = blob(teamMats[team], 0.15 * big, 0.1 * big, 0.17 * big, s * 0.31 * big, 0.6, 0); up.add(pad); }
-  // helmet with a glowing visor
   const headY = 0.86;
-  const helm = blob(armor, 0.17 * big, 0.19 * big, 0.19 * big, 0, headY, 0.01); up.add(helm);
-  const visor = box(visorMat, 0.24 * big, 0.07, 0.06, 0, headY + 0.02, -0.16 * big); up.add(visor);
+  const glow = teamGlow[team];
+  if (MARINE_STYLE === 'plate') {
+    // A: sloped angular pauldrons in armour colour with a thin team-colour edge, rounded helmet with a T visor
+    for (const s of [-1, 1]) {
+      const pad = new THREE.Mesh(new RoundedBoxGeometry(0.24 * big, 0.1, 0.3 * big, 2, 0.03), armor); pad.position.set(s * 0.33 * big, 0.6, 0); pad.rotation.z = -s * 0.35; up.add(pad);
+      const edge = box(glow, 0.03, 0.03, 0.3 * big, s * 0.44 * big, 0.55, 0); edge.rotation.z = -s * 0.35; up.add(edge);
+    }
+    up.add(rbox(armor, [0.3 * big, 0.32, 0.34 * big, 2, 0.09], 0, headY, 0.01));
+    up.add(box(visorMat, 0.24 * big, 0.06, 0.04, 0, headY + 0.03, -0.17 * big));
+    up.add(box(visorMat, 0.06, 0.12, 0.04, 0, headY - 0.04, -0.17 * big));
+  } else if (MARINE_STYLE === 'power') {
+    // B: chunky power armour: stacked square pauldrons, a big backpack with two glowing team-colour vents
+    for (const s of [-1, 1]) {
+      up.add(rbox(armor, [0.3 * big, 0.16, 0.36 * big, 2, 0.04], s * 0.36 * big, 0.62, 0));
+      up.add(rbox(darkMat, [0.24 * big, 0.08, 0.3 * big, 2, 0.03], s * 0.4 * big, 0.53, 0));
+    }
+    up.add(rbox(darkMat, [0.46 * big, 0.5, 0.26, 2, 0.05], 0, 0.46, 0.3 * big));
+    for (const s of [-1, 1]) up.add(box(glow, 0.06, 0.04, 0.2, s * 0.12 * big, 0.73, 0.32 * big));
+    up.add(rbox(armor, [0.32 * big, 0.3, 0.34 * big, 2, 0.06], 0, headY, 0.02));
+    up.add(box(armor, 0.05, 0.08, 0.3 * big, 0, headY + 0.17, 0.02)); // crest
+    up.add(box(visorMat, 0.26 * big, 0.07, 0.04, 0, headY + 0.02, -0.17 * big));
+  } else if (MARINE_STYLE === 'ranger') {
+    // C: slim and light: a hooded cloak over the shoulders, a wrap-around visor and a team-colour beacon on the pack
+    const cloakMat = toon({ color: type === 'sniper' ? 0x6a5a44 : type === 'heavy' ? 0x3a3f46 : 0x4c5646, roughness: 0.95, metalness: 0 });
+    const cape = new THREE.Mesh(new THREE.CylinderGeometry(0.2 * big, 0.36 * big, 0.34, 7, 1, true), cloakMat); cape.position.set(0, 0.56, 0.02); up.add(cape);
+    const hood = new THREE.Mesh(new THREE.SphereGeometry(0.2 * big, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), cloakMat); hood.position.set(0, headY + 0.02, 0.04); up.add(hood);
+    up.add(blob(armor, 0.15 * big, 0.17 * big, 0.17 * big, 0, headY, 0.0));
+    up.add(box(visorMat, 0.27 * big, 0.06, 0.2 * big, 0, headY + 0.02, -0.06));
+    const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.05, 10), glow); beacon.position.set(0.1, 0.62, 0.3 * big); up.add(beacon);
+  } else {
+    // classic: rounded shoulder pads in team colour
+    for (const s of [-1, 1]) { const pad = blob(teamMats[team], 0.15 * big, 0.1 * big, 0.17 * big, s * 0.31 * big, 0.6, 0); up.add(pad); }
+    const helm = blob(armor, 0.17 * big, 0.19 * big, 0.19 * big, 0, headY, 0.01); up.add(helm);
+    const visor = box(visorMat, 0.24 * big, 0.07, 0.06, 0, headY + 0.02, -0.16 * big); up.add(visor);
+  }
   if (type === 'heavy') up.add(box(armor, 0.36, 0.16, 0.3, 0, headY - 0.12, 0)); // armoured collar
   // arms holding the rifle
   u.arms = [-1, 1].map(s => { const a = limb(suitMat, 0.48, 0.13 * big, s * 0.3 * big, 0.58, 0); a.rotation.x = -1.1; a.rotation.z = -s * 0.25; a.add(box(armor, 0.16 * big, 0.2, 0.16 * big, 0, -0.08, 0)); return a; });
@@ -2697,6 +2730,7 @@ function updateCamera(dt) {
     camera.quaternion.copy(pose.quat);
     camera.fov += (pose.fov - camera.fov) * Math.min(1, dt * 14);
   }
+  if (window.__camLook) { const c = window.__camLook; camera.position.set(...c.pos); camera.lookAt(...c.at); camera.fov = c.fov || 40; } // debug: fixed shots for screenshots
   camera.updateProjectionMatrix();
   // recoil springs back, the gun kicks, sways against your look and bobs as you walk
   fps.recoil *= Math.exp(-dt * 9);
