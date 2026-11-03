@@ -3318,7 +3318,7 @@ function renderTopbar(dt) {
   const nest = p => `<span class="nest ${p.owner === PLAYER ? 'mine' : p.owner === ENEMY ? 'theirs' : ''}${p.contested ? ' fight' : ''}">${p.name}</span>`;
   const bar = (label, k, cls, extra = '') => `<span class="base ${cls}"><b>${label}</b><em><s style="width:${Math.round(k * 100)}%"></s></em>${extra}</span>`;
   const timer = camp.m && camp.m.story ? '' : tac.on || turn.on ? `<span class="chip">👾 ${countUnits(ENEMY)} vs 🪖 ${countUnits(PLAYER)}</span>` : `<span class="chip">👾 wave in ${Math.ceil(waveTimer)}s</span>`;
-  $('status').innerHTML = `<span class="nests">${points.map(nest).join('')}</span>${bar('Outpost', pb, 'ours')}${bar('Hive', eb, 'enemy', enemyBase.shield ? '<i title="Bio-shield: hold all 3 relays">🛡</i>' : '<i title="Cracked!">💥</i>')}${timer}${campaignObjective()}`;
+  $('status').innerHTML = `<span class="nests">${points.map(nest).join('')}</span>${playerBase.dead ? '' : bar('Outpost', pb, 'ours')}${enemyBase.dead ? '' : bar('Hive', eb, 'enemy', enemyBase.shield ? '<i title="Bio-shield: hold all 3 relays">🛡</i>' : '<i title="Cracked!">💥</i>')}${timer}${campaignObjective()}`;
 }
 
 const setLabel = (id, text) => { const b = $(id), sp = b && b.querySelector('span'); if (sp) sp.textContent = text; else if (b) b.textContent = text; };
@@ -4008,7 +4008,7 @@ function bark(u, kind) {
 const tbMine = () => entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower);
 const tbFoes = () => entities.filter(e => !e.dead && e.team === ENEMY && !e.isBase);
 
-const TB_MARINE_SCALE = 1.5, TB_ALIEN_SCALE = 1.3; // the camera sits close on phones, so units only need a modest boost
+const TB_MARINE_SCALE = 1.5, TB_ALIEN_SCALE = 1.45; // the camera sits close on phones, so units only need a modest boost
 function startTurns() {
   turn.on = true; turn.n = 1; turn.side = 'player';
   document.body.classList.add('xcom');
@@ -4820,7 +4820,7 @@ function drawTurnUI() {
     const a = proj(u.x, u.z), b = proj(pv.t.x, pv.t.z);
     octx.strokeStyle = '#ff6a5a'; octx.lineWidth = 2; octx.setLineDash([4, 5]); octx.beginPath(); octx.moveTo(a.x, a.y); octx.lineTo(b.x, b.y); octx.stroke(); octx.setLineDash([]);
     const i = pv.info, dmg = TBS[u.type] || TBS.trooper, k = u.dmg / TYPES[u.type].dmg * (pv.t.isBase ? TB_BASE_DMG : 1);
-    label(b.x, b.y + 34, `${pv.aimed ? 'Aimed shot' : 'Shoot'} · ${i.chance}% hit · ${i.crit}% crit · ${Math.round(dmg.dmg[0] * k)}-${Math.round(dmg.dmg[1] * k)} dmg${isTouch ? '' : ' · click again'}`, '#ffd0c8');
+    if (!isTouch) label(b.x, b.y + 34, `${pv.aimed ? 'Aimed shot' : 'Shoot'} · ${i.chance}% hit · ${i.crit}% crit · ${Math.round(dmg.dmg[0] * k)}-${Math.round(dmg.dmg[1] * k)} dmg${isTouch ? '' : ' · click again'}`, '#ffd0c8');
     return;
   }
   if (pv && pv.kind === 'move') {
