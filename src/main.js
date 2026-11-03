@@ -2438,7 +2438,7 @@ function possess(u) {
   setMode('fps', swap ? 3 : 9);
   sfx('whoosh');
   if (!isTouch && canvas.requestPointerLock) { try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch { /* ignore */ } }
-  toast(`You are a ${nameOf(u)} · Q ${KITS[u.type][0].name} · E ${KITS[u.type][1].name} · X ultimate`, 1.6);
+  toast(isTouch ? `You are ${u.callsign || 'a ' + nameOf(u)}` : `You are a ${nameOf(u)} · Q ${KITS[u.type][0].name} · E ${KITS[u.type][1].name} · X ultimate`, 1.6);
   sfx('quack');
 }
 
@@ -2497,6 +2497,26 @@ const KITS = {
   sniper: [{ name: 'Scope', cd: 0 }, { name: 'Jump jet', cd: 6 }, { name: 'Recon scan' }],
   elite: [{ name: '' }, { name: '' }, { name: '' }],
 };
+// round icon buttons by the Fire button, like a mobile shooter
+const FPS_ICON = {
+  'Frag grenade': '<circle cx="12" cy="14" r="6.5"/><path d="M10 7.5V5h4v2.5M14 5l3-2"/>',
+  'Combat roll': '<path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M17 2v4h-4"/>',
+  'Drone swarm': '<circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="7" r="2.2"/><circle cx="12" cy="17" r="2.2"/><path d="M8 8l2.5 7M16 8l-2.5 7M8.2 7h7.6"/>',
+  'Energy wall': '<path d="M3 20V9l9-5 9 5v11"/><path d="M3 14h18M8 9v11M16 9v11"/>',
+  'Shield charge': '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M13 7l-3 5h4l-3 5"/>',
+  'Shockwave': '<circle cx="12" cy="12" r="2.5"/><path d="M6.5 6.5a8 8 0 0 0 0 11M17.5 6.5a8 8 0 0 1 0 11M3.5 3.5a12 12 0 0 0 0 17M20.5 3.5a12 12 0 0 1 0 17"/>',
+  'Scope': '<circle cx="12" cy="12" r="8"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
+  'Jump jet': '<path d="M12 3l5 7h-3v5h-4v-5H7z"/><path d="M9 18l-1 3M12 18v3M15 18l1 3"/>',
+  ult: '<path d="M12 2.5l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 16.8 6.2 20l1.4-6.4-4.9-4.4 6.5-.7z"/>',
+  'Recon scan': '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l6-6"/>',
+};
+const fpsBtnSig = {};
+function fpsIconBtn(id, name, key, cd, extra = '') {
+  const b = $(id), sig = `${name}|${cd}|${extra}`;
+  if (fpsBtnSig[id] === sig) return; fpsBtnSig[id] = sig;
+  b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${FPS_ICON[name] || '<circle cx="12" cy="12" r="6"/>'}</svg>${cd ? `<b class="cdn">${cd}</b>` : ''}${extra}<kbd>${key}</kbd>`;
+  b.title = `${name} (${key})`; b.setAttribute('aria-label', name);
+}
 function chargeUlt(u, amt) {
   if (!u || u.team !== PLAYER) return;
   const before = u.ult || 0;
@@ -3843,12 +3863,13 @@ function updateHud(dt) {
     const lab = (i, key) => {
       const b = $(i ? 'btnAbility2' : 'btnAbility');
       const scope = possessed.type === 'sniper' && i === 0;
-      b.textContent = scope ? (fps.scoped ? `Unscope (${key})` : `Scope (${key})`) : cds[i] > 0 ? `${kit[i].name} ${Math.ceil(cds[i])}s` : `${kit[i].name} (${key})`;
+      fpsIconBtn(b.id, kit[i].name, key, !scope && cds[i] > 0 ? Math.ceil(cds[i]) : 0, scope && fps.scoped ? '<i class="on"></i>' : '');
       b.classList.toggle('cd', !scope && cds[i] > 0);
     };
     lab(0, 'Q'); lab(1, 'E');
     const ult = Math.floor(possessed.ult || 0), ub = $('btnUlt');
-    ub.textContent = ult >= 100 ? `★ ${kit[2].name} (X)` : `★ ${ult}%`;
+    fpsIconBtn('btnUlt', 'ult', 'X', 0, `${ult < 100 ? `<b class="pct">${ult}%</b>` : ''}`);
+    ub.title = `${kit[2].name} (X)`;
     ub.classList.toggle('ready', ult >= 100);
     ub.style.setProperty('--p', `${ult}%`);
   }

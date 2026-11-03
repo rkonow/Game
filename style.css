@@ -673,3 +673,25 @@ body.tbui.tbEnemy:not(.fps) #toast { top: calc(100px + env(safe-area-inset-top))
   #tbCenter { bottom: calc(var(--tbph, 190px) + 12px); }
   body.tbui:not(.fps) #coach:not(.hidden) ~ #tb #tbCenter { bottom: calc(var(--tbph, 190px) + 96px); }
 }
+
+/* ---- first-person skill buttons: round icons around Fire, like a mobile shooter */
+#fpsActions button { position: relative; width: 56px; height: 56px; min-width: 0; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; background: rgba(16, 22, 30, .72); border: 2px solid rgba(255,255,255,.35); }
+#fpsActions button svg { width: 26px; height: 26px; fill: none; stroke: #eaf2fb; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#fpsActions button.cd svg { opacity: .35; }
+#fpsActions button .cdn { position: absolute; inset: 0; display: grid; place-items: center; font: 800 18px system-ui; color: #fff; text-shadow: 0 1px 3px #000; }
+#fpsActions button .pct { position: absolute; bottom: -7px; left: 50%; transform: translateX(-50%); font: 800 10px system-ui; color: #ffd36a;
+  background: rgba(10,14,20,.85); border-radius: 6px; padding: 0 4px; }
+#fpsActions button i.on { position: absolute; inset: -4px; border-radius: 50%; border: 3px solid #7fe0ff; }
+#fpsActions button kbd { position: absolute; top: -6px; right: -6px; font: 700 10px system-ui; color: #0b1119; background: #cfd8e3; border-radius: 5px; padding: 0 4px; }
+#btnUlt { background: conic-gradient(rgba(255,200,60,.75) var(--p, 0%), rgba(16,22,30,.72) var(--p, 0%)) !important; }
+#btnUlt svg { stroke: #ffd36a !important; }
+#btnUlt.ready { background: #ffc340 !important; border-color: #fff0a0; }
+#btnUlt.ready svg { stroke: #3b2a1a !important; fill: #3b2a1a !important; }
+body:not(.touch) #fpsActions { flex-direction: row; gap: 12px; align-items: center; }
+body.touch #fpsActions { position: absolute; right: env(safe-area-inset-right); bottom: env(safe-area-inset-bottom); width: 0; height: 0; display: block; padding: 0; background: none; border: 0; }
+body.touch #fpsActions button { position: absolute; width: 60px; height: 60px; min-height: 0; min-width: 0; padding: 0; }
+body.touch #fpsActions button kbd { display: none; }
+body.touch #btnAbility  { right: 146px; bottom: 52px; }   /* left of Fire */
+body.touch #btnAbility2 { right: 132px; bottom: 124px; }  /* up and left */
+body.touch #btnUlt      { right: 50px;  bottom: 172px; }  /* above Fire */
