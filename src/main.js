@@ -675,7 +675,7 @@ const playerPointCount = () => points.filter(p => p.owner === PLAYER).length;
 let entities = [];
 const teamMats = TEAM_COLORS.map(c => toon({ color: c, roughness: 0.45, metalness: 0.4 }));
 const teamGlow = TEAM_COLORS.map(c => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 1.6, roughness: 0.3 }));
-const MARINE_STYLE = (new URLSearchParams(location.search).get('marine') || 'classic').toLowerCase();
+const MARINE_STYLE = (new URLSearchParams(location.search).get('marine') || 'power').toLowerCase();
 const darkMat = toon({ color: 0x353b44, roughness: 0.4, metalness: 0.55 });   // gunmetal
 const goldMat = toon({ color: 0x5a2a7a, emissive: 0x6a1aa0, emissiveIntensity: 0.6, roughness: 0.25, metalness: 0.3 }); // tyrant carapace
 const visorMat = new THREE.MeshStandardMaterial({ color: 0x0a1a24, emissive: 0x38c8ff, emissiveIntensity: 1.8, roughness: 0.1, metalness: 0.6 });
@@ -689,7 +689,7 @@ const NAMES = [
 ];
 const nameOf = u => NAMES[u.team][u.type];
 const sphere = new THREE.SphereGeometry(1, 16, 12);
-const ARMOR = { trooper: 0x6d7a68, heavy: 0x4a4f58, sniper: 0xa89478 };   // olive, steel, desert
+const ARMOR = { trooper: 0xdfe5ea, heavy: 0xb9c6d4, sniper: 0xe9e1c8 };   // light armour that stands out on the red ground: white, pale steel, bone
 const CARAPACE = { trooper: 0x3a2448, heavy: 0x2a1a30, sniper: 0x3c2a1c, burrower: 0x5a3a22, shielder: 0x1c2c4a, eggsac: 0x5a2a40 };
 const ALIEN_MODEL = { burrower: 'trooper', shielder: 'heavy' };
 
@@ -699,6 +699,41 @@ function tagMeshes(group, ent) {
 const prec = m => { m.userData.prec = true; return m; }; // a precision (crit) spot: heads, eyes, mandibles, horns
 function blob(mat, sx, sy, sz, x, y, z) {
   const m = new THREE.Mesh(sphere, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); return m;
+}
+// a dark ink outline (an inverted hull) so marines read against any ground
+const inkMat = new THREE.MeshBasicMaterial({ color: 0x07090c, side: THREE.BackSide });
+function outlineMeshes(g) {
+  const ms = []; g.traverse(o => { if (o.isMesh) ms.push(o); });
+  for (const m of ms) { const o = new THREE.Mesh(m.geometry, inkMat); o.scale.setScalar(1.12); o.castShadow = false; o.userData.ink = true; m.add(o); }
+}
+// personality: every marine gets its own visor colour, a head piece and a bit of kit on the pack, picked from a seed
+// (campaign marines use their roster id, so the same marine always looks the same)
+const PERSONA_VISOR = [0x38c8ff, 0xffb020, 0x5dff9a, 0xff5ab4, 0xf4f4ff, 0xff5a3c];
+const PERSONA_ACCENT = [0xff7a2a, 0xffd23f, 0xe0404a, 0x7dff6a, 0xff6ad5, 0x5ad1ff];
+const personaMats = {};
+const pMat = (c, glow) => personaMats[c + (glow ? 'g' : '')] ??= glow ? new THREE.MeshStandardMaterial({ color: 0x0a1a24, emissive: c, emissiveIntensity: 1.8, roughness: 0.1, metalness: 0.6 }) : toon({ color: c, roughness: 0.5, metalness: 0.1 });
+function addPersona(u, seed) {
+  if (!u.head) return;
+  let t = seed >>> 0 || 1; const rnd = () => { t = (t * 1664525 + 1013904223) >>> 0; return t / 4294967296; };
+  const pick = a => a[Math.floor(rnd() * a.length)];
+  if (u.persona) { for (const g of u.persona) g.parent && g.parent.remove(g); }
+  u.persona = [];
+  const visor = pMat(pick(PERSONA_VISOR), true), accent = pMat(pick(PERSONA_ACCENT));
+  u.head.traverse(o => { if (o.isMesh && o.material === visorMat) o.material = visor; });
+  const hg = new THREE.Group(); u.head.add(hg); u.persona.push(hg);
+  const hat = pick(['crest', 'horns', 'bandana', 'antennae', 'beret', 'none']);
+  if (hat === 'crest') for (let k = 0; k < 4; k++) hg.add(box(accent, 0.05, 0.09 - k * 0.012, 0.06, 0, 0.2 - k * 0.01, -0.09 + k * 0.07));
+  if (hat === 'horns') for (const sd of [-1, 1]) { const h = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.16, 6), pMat(0xeee2c8)); h.position.set(sd * 0.13, 0.15, 0); h.rotation.z = -sd * 0.6; hg.add(h); }
+  if (hat === 'bandana') { hg.add(box(accent, 0.33, 0.05, 0.36, 0, 0.09, 0.01)); for (const sd of [-1, 1]) { const tl = box(accent, 0.04, 0.12, 0.03, sd * 0.05, 0.03, 0.2); tl.rotation.x = 0.5; hg.add(tl); } }
+  if (hat === 'antennae') for (const sd of [-1, 1]) { const r = box(darkMat, 0.015, 0.16, 0.015, sd * 0.08, 0.24, 0.05); r.rotation.z = -sd * 0.25; hg.add(r); hg.add(blob(accent, 0.035, 0.035, 0.035, sd * 0.1, 0.32, 0.05)); }
+  if (hat === 'beret') { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.17, 0.05, 12), accent); b.position.set(0.03, 0.18, 0); b.rotation.z = 0.25; hg.add(b); }
+  const pg = new THREE.Group(); u.upper.add(pg); u.persona.push(pg);
+  const back = pick(['radio', 'bedroll', 'flag', 'none']);
+  if (back === 'radio') { pg.add(box(darkMat, 0.015, 0.45, 0.015, -0.14, 0.82, 0.3)); const tip = blob(pMat(0xff4040, true), 0.03, 0.03, 0.03, -0.14, 1.05, 0.3); pg.add(tip); u.blink = tip; }
+  if (back === 'bedroll') { const r = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.38, 10), accent); r.rotation.z = Math.PI / 2; r.position.set(0, 0.64, 0.3); pg.add(r); }
+  if (back === 'flag') { pg.add(box(darkMat, 0.015, 0.55, 0.015, 0.14, 0.86, 0.3)); const f = box(accent, 0.01, 0.12, 0.18, 0.14, 1.06, 0.39); pg.add(f); u.flag = f; }
+  u.lookSeed = rnd() * 100;
+  for (const g of u.persona) { outlineMeshes(g); g.traverse(o => { o.userData.entity = u; if (o.isMesh && !o.userData.ink) o.castShadow = true; }); }
 }
 function rbox(mat, args, x, y, z) { const m = new THREE.Mesh(new RoundedBoxGeometry(...args), mat); m.position.set(x, y, z); return m; }
 function box(mat, w, h, d, x, y, z) {
@@ -713,7 +748,7 @@ function limb(mat, len, thick, x, y, z, foot) {
 }
 
 function buildMarine(u, g, type, team) {
-  const armor = toon({ color: ARMOR[type], roughness: 0.5, metalness: 0.55, normalMap: plateTex.nrm, normalScale: new THREE.Vector2(0.4, 0.4) });
+  const armor = toon({ color: ARMOR[type], roughness: 0.45, metalness: 0.2, normalMap: plateTex.nrm, normalScale: new THREE.Vector2(0.4, 0.4) });
   u.bodyMat = armor;
   const big = type === 'heavy' ? 1.25 : 1, tall = type === 'sniper' ? 1.06 : 1;
   // legs (pivot at the hip) with armoured boots
@@ -776,6 +811,10 @@ function buildMarine(u, g, type, team) {
   u.gun = gun;
   u.muzzleOffset = { side: 0.12, fwd: gunLen + 0.2, y: 0.66 * tall + 0.45 };
   u.feet = u.legs; u.wings = u.arms;
+  // gather the helmet parts into a head that can look around, and make it a bit big (cartoon proportions read better from above)
+  const head = new THREE.Group(); head.position.set(0, headY, 0); up.add(head); u.head = head;
+  for (const m of [...up.children]) if (m !== head && m.position.y >= headY - 0.1) { head.attach(m); }
+  head.scale.setScalar(1.3); u.headY0 = headY;
   if (type === 'heavy') g.scale.setScalar(1.08);
 }
 
@@ -860,7 +899,7 @@ function makeUnit(team, type, x, z) {
     elite: type === 'elite',
   };
   const g = new THREE.Group();
-  if (team === PLAYER) buildMarine(u, g, type, team); else buildAlien(u, g, type);
+  if (team === PLAYER) { buildMarine(u, g, type, team); outlineMeshes(g); addPersona(u, u.uid * 7919); } else buildAlien(u, g, type);
   u.animT = Math.random() * 10;
   if (type === 'elite') { g.scale.setScalar(1.3); if (camp.m && camp.m.tyrantHp) u.hp = u.maxHp = Math.round(u.maxHp * camp.m.tyrantHp); }
   u.baseScale = g.scale.x;
@@ -3734,6 +3773,10 @@ function animateBird(e, dt, now) {
     up.rotation.z -= up.rotation.z * k; up.rotation.y -= up.rotation.y * k;
     if (!alien && up.userData.y0 !== undefined) up.position.y += (up.userData.y0 - up.position.y) * k; else if (alien) up.position.y -= up.position.y * k;
     up.scale.y = 1 + Math.sin(now / 600 + e.animT) * 0.015; // breathing
+    if (e.head) { // marines look around now and then, with a little head tilt
+      const ph = (now / 1000 + e.lookSeed) % 6, look = ph < 1.2 ? Math.sin(ph / 1.2 * Math.PI) * 0.7 : ph > 3 && ph < 3.8 ? -Math.sin((ph - 3) / 0.8 * Math.PI) * 0.5 : 0;
+      e.head.rotation.y += (look - e.head.rotation.y) * Math.min(1, dt * 6); e.head.rotation.z = look * 0.15;
+    }
     const twitch = alien && (now / 1000 + e.animT) % 3.5 < 0.25; // aliens rear up and twitch now and then
     up.rotation.x += ((twitch ? -0.25 : 0) - up.rotation.x) * Math.min(1, dt * (twitch ? 16 : 6));
   }
@@ -3743,6 +3786,14 @@ function animateBird(e, dt, now) {
     if (e.gun) e.gun.position.z = -0.3 + kick;
     if (alien) up.rotation.x = 0.12 - kick; else up.rotation.x = -0.04;
   } else if (e.gun) e.gun.position.z += (-0.3 - e.gun.position.z) * 0.3;
+  if (e.cheerT > 0) { // a little victory hop with the gun raised after a kill
+    e.cheerT -= dt; const c = Math.max(0, e.cheerT);
+    up.position.y = (up.userData.y0 ?? up.position.y) + Math.abs(Math.sin(c * 9)) * 0.22 * Math.min(1, c * 2);
+    if (e.arms) for (const a of e.arms) a.rotation.x = -1.1 - 1.2 * Math.min(1, c * 3);
+    if (e.cheerT <= 0 && e.arms) for (const a of e.arms) a.rotation.x = -1.1;
+  }
+  if (e.blink) e.blink.visible = (now / 600 + (e.lookSeed || 0)) % 1 < 0.5;
+  if (e.flag) e.flag.rotation.y = Math.sin(now / 180 + (e.lookSeed || 0)) * 0.35;
   if (e.sac) e.sac.scale.setScalar(0.3 + Math.sin(now / 200 + e.animT) * 0.03);
   if (e.pulse) e.pulse.scale.setScalar(0.32 + Math.sin(now / 260 + e.animT) * 0.06);
   if (e.eyes && alien) { const b = 1.5 + Math.sin(now / 300 + e.animT) * 0.5; for (const ey of e.eyes) ey.scale.z = 0.03 * b; }
@@ -3897,7 +3948,10 @@ const pathLen = (u, path) => { let L = 0, x = u.x, z = u.z; for (const p of path
 function floatText(x, z, text, color, big = false) {
   dmgNums.push({ x, y: 2.2, z, text, life: 1.6, crit: big, dx: 0, color });
 }
-function focusOn(x, z) { turn.focus.set(x, 0, z + (camera.aspect < 1 ? 2 : 0)); turn.focusT = 0.9; }
+function focusOn(x, z) { // keep the unit in the part of the screen the turn panel leaves free
+  const side = turn.on && camera.aspect > 1 && innerHeight <= 560;
+  turn.focus.set(x + (side ? rts.zoom * 0.2 : 0), 0, z + (camera.aspect < 1 ? 2 : 0)); turn.focusT = 0.9;
+}
 
 // ---- per frame: units walk their paths, overwatch reacts to anything that moves
 function turnUnit(u, dt) {
@@ -4505,14 +4559,11 @@ function drawTurnUI() {
   // ring, an arrow and its name. Overwatch and hunker show as small chips over the head.
   octx.textAlign = 'center';
   for (const m of tbMine()) {
-    const r = 0.45 * (m.big || 1), done = turn.side === 'player' && m.ap <= 0;
-    groundCircle(m.x, m.z, r, 28);
-    if (done) { octx.setLineDash([5, 4]); octx.strokeStyle = 'rgba(160,176,195,.8)'; octx.lineWidth = 2.5; octx.stroke(); octx.setLineDash([]); }
-    else { octx.fillStyle = 'rgba(74,168,255,.22)'; octx.fill(); octx.strokeStyle = '#4aa8ff'; octx.lineWidth = 3; octx.stroke(); }
-    if (m === u) {
-      groundCircle(m.x, m.z, r + 0.3, 32); octx.save(); octx.shadowColor = 'rgba(255,211,106,.9)'; octx.shadowBlur = 12;
-      octx.strokeStyle = '#ffd36a'; octx.lineWidth = 4; octx.stroke(); octx.restore();
-    }
+    const r = 0.36 * (m.big || 1), done = turn.side === 'player' && m.ap <= 0;
+    groundCircle(m.x, m.z, m === u ? r + 0.12 : r, 28);
+    if (m === u) { octx.strokeStyle = '#ffd36a'; octx.lineWidth = 2.5; octx.stroke(); }
+    else if (done) { octx.setLineDash([3, 4]); octx.strokeStyle = 'rgba(160,176,195,.6)'; octx.lineWidth = 1.5; octx.stroke(); octx.setLineDash([]); }
+    else { octx.strokeStyle = 'rgba(110,190,255,.75)'; octx.lineWidth = 1.5; octx.stroke(); }
     const s = toScreen(m.x, 2.3 + 1.9 * ((m.big || 1) - 1), m.z); if (s.behind) continue;
     if (m === u) {
       octx.fillStyle = '#ffd36a'; octx.strokeStyle = '#0b1119'; octx.lineWidth = 2;
@@ -4527,7 +4578,8 @@ function drawTurnUI() {
   }
   // aliens you have seen: an arrow at the screen edge when they are off screen, a "last seen" marker when they vanish
   {
-    const top = 52, bot = innerHeight - (($('tbPanel') && $('tbPanel').offsetHeight) || 0) - 8;
+    const pr = $('tbPanel') ? $('tbPanel').getBoundingClientRect() : null, side = pr && pr.left > innerWidth / 2 && pr.width > 0;
+    const top = 52, bot = side || !pr ? innerHeight - 8 : pr.top - 8, rightB = side ? pr.left : innerWidth;
     for (const h of tbFoes()) {
       if (hiddenFoe(h)) {
         if (!h.lastSeen) continue;
@@ -4547,11 +4599,11 @@ function drawTurnUI() {
           octx.fillStyle = 'rgba(0,0,0,.65)'; octx.fillRect(hb.x - w / 2 - 1, hb.y - 1, w + 2, 6);
           octx.fillStyle = h.shieldHP > 0 ? '#7fc8ff' : '#ff5a3c'; octx.fillRect(hb.x - w / 2, hb.y, w * f, 4); } }
       const q = toScreen(h.x, 0.6, h.z);
-      const off = q.behind || q.x < 8 || q.x > innerWidth - 8 || q.y < top || q.y > bot;
+      const off = q.behind || q.x < 8 || q.x > rightB - 8 || q.y < top || q.y > bot;
       if (!off) continue;
       let x = q.x, y = q.y;
       if (q.behind) { x = innerWidth - x; y = bot; }
-      x = Math.max(22, Math.min(innerWidth - 22, x)); y = Math.max(top + 14, Math.min(bot - 14, y));
+      x = Math.max(22, Math.min(rightB - 22, x)); y = Math.max(top + 14, Math.min(bot - 14, y));
       const ang = Math.atan2(q.y - y, q.x - x) || (q.behind ? Math.PI / 2 : 0);
       octx.save(); octx.translate(x, y); octx.rotate(ang);
       octx.fillStyle = 'rgba(40,14,6,.85)'; octx.strokeStyle = '#ff8a3d'; octx.lineWidth = 2.5;
@@ -4865,6 +4917,7 @@ function launchMission(i, pick, checkpoint = 0) {
 function applyRank(u, r) {
   const rk = rankOf(r.xp);
   u.rid = r.id; u.callsign = callsign(r); u.rank = rk;
+  { let h = 7; for (const ch of String(r.id) + (r.name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; addPersona(u, h); }
   const k = 1 + 0.12 * rk;
   u.maxHp = Math.round(u.maxHp * k); u.hp = u.maxHp;
   u.dmg *= 1 + 0.1 * rk;
@@ -4908,6 +4961,7 @@ function campaignWin(text) { if (!camp.done) endGame(true, text); }
 function campaignKill(e, src) {
   if (!camp.m) return;
   if (e.team === ENEMY && src && src.rid) src.kills = (src.kills || 0) + 1;
+  if (e.team === ENEMY && src && src.team === PLAYER && src.arms) src.cheerT = 1.2;
   if (turn.on && e.team === ENEMY && src && src.team === PLAYER && turn.fp < FOCUS_MAX) { turn.fp++; floatText(e.x, e.z - 0.01, '+1 ◆', '#c9a0ff', false); }
   if (e.team === ENEMY && e.elite && camp.m.goal.type === 'tyrant') setTimeout(() => campaignWin('The Hive Tyrant is dead. The swarm is leaderless.'), 1200);
   if (e.team === PLAYER && e.callsign) radio(`${e.callsign} is down. KIA.`, 'warn');
@@ -5236,13 +5290,12 @@ function frame(now) {
       const want = turn.on && !turn.live && mode === 'rts' ? (e.team === PLAYER ? TB_MARINE_SCALE : TB_ALIEN_SCALE) : 1;
       e.big = (e.big || 1) + (want - (e.big || 1)) * Math.min(1, dt * 8);
     }
-    if (turn.on && !turn.live && e.ring) e.ring.visible = false; // the turn UI draws its own team discs and selection ring
     { const q = Math.max(0, e.flash) * 1.4, b = (e.baseScale || 1) * (e.big || 1); e.mesh.scale.set(b * (1 + q), b * (1 - q), b * (1 + q)); } // squash when hit
     if (e.upper && !(tac.on && tac.phase === 'plan')) animateBird(e, dt, now);
     e.mesh.rotation.y = e.facing;
     // in first person, a squadmate brushing past the camera would fill the screen with armour for a frame: hide anyone that close
     e.mesh.visible = !e.possessed && !hiddenFoe(e) && !(mode === 'fps' && possessed && e.team === PLAYER && !e.isTower && Math.hypot(e.x - possessed.x, e.z - possessed.z) < 1.15);
-    e.ring.visible = selection.includes(e) && mode !== 'fps';
+    e.ring.visible = selection.includes(e) && mode !== 'fps' && !(turn.on && !turn.live); // the turn UI draws its own rings
     if (!e.elite) {
       e.bodyMat.emissive.setHex(e.flash > 0 ? 0xffffff : e.armorT > 0 ? 0x2266ff : 0);
       e.bodyMat.emissiveIntensity = e.flash > 0 ? 0.6 : e.armorT > 0 ? 0.5 : 0;

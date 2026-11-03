@@ -648,3 +648,23 @@ body.tbEnemy #tbStrip { display: flex; }
 #tbConfirm:not(.hidden) ~ #tbActs, #tbConfirm:not(.hidden) ~ #tbRow { display: none; }
 body.tbEnemy #tbActs, body.tbEnemy #tbRow, body.tbEnemy #tbShop { display: none; }
 body.tbui.tbEnemy:not(.fps) #toast { top: calc(100px + env(safe-area-inset-top)); }
+/* landscape phones: the turn panel becomes a column on the right so the map keeps the full height */
+@media (orientation: landscape) and (max-height: 560px) {
+  #tbPanel { left: auto; right: 0; transform: none; top: calc(44px + env(safe-area-inset-top)); bottom: 0; width: min(300px, 40vw);
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom)) 6px; padding-right: calc(6px + env(safe-area-inset-right));
+    border: 0; border-left: 1px solid #1f2c3b; border-radius: 0; overflow-y: auto; gap: 5px; }
+  #tbSquad { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+  #tbSquad button { height: 58px; padding: 3px 4px; }
+  #tbActs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+  #tbActs button { height: 44px; }
+  #tbRow { flex-direction: column-reverse; gap: 4px; }
+  #tbShopBtn { width: 100%; height: 38px; }
+  #tbRow #btnEndTurn { flex: none; height: 46px; }
+  #tbShop { grid-template-columns: 1fr; }
+  #tbCenter { bottom: calc(12px + env(safe-area-inset-bottom)); right: calc(min(300px, 40vw) + 12px); }
+  body.tbui:not(.fps) #coach { left: calc(12px + env(safe-area-inset-left)); transform: none; width: calc(100vw - min(300px, 40vw) - 36px); max-width: 460px;
+    top: auto; bottom: calc(10px + env(safe-area-inset-bottom)); font-size: 12px; padding: 6px 10px; }
+  body.tbui:not(.fps) #toast { left: calc((100vw - min(300px, 40vw)) / 2); }
+  body.tbui:not(.fps) #radio { left: calc((100vw - min(300px, 40vw)) / 2); max-width: 50vw; }
+  body.tbui.tbMapOpen:not(.fps) #minimap { right: calc(min(300px, 40vw) + 10px); width: 120px; height: 120px; }
+}
