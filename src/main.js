@@ -747,7 +747,94 @@ function limb(mat, len, thick, x, y, z, foot) {
   return g;
 }
 
+// the detailed power-armour marine (the default look): layered plates, knee and thigh armour, a helmet with a jaw guard
+// and slanted visor, glowing team trim, and a proper gun for each class
+function buildPowerMarine(u, g, type, team) {
+  const armor = toon({ color: ARMOR[type], roughness: 0.4, metalness: 0.25, normalMap: plateTex.nrm, normalScale: new THREE.Vector2(0.35, 0.35) });
+  u.bodyMat = armor;
+  const glow = teamGlow[team], dark = darkMat, suit = suitMat;
+  const W = type === 'heavy' ? 1.22 : type === 'sniper' ? 0.94 : 1; // width: the juggernaut is a slab, the ranger is lean
+  const hip = 0.72;
+  // legs: thigh plate, knee pad, shin guard, boot
+  u.legs = [-1, 1].map(sd => {
+    const l = new THREE.Group(); l.position.set(sd * 0.13 * W, hip, 0);
+    l.add(box(suit, 0.15 * W, 0.7, 0.16, 0, -0.35, 0));
+    l.add(rbox(armor, [0.2 * W, 0.3, 0.22, 2, 0.04], sd * 0.01, -0.17, -0.01));
+    l.add(rbox(armor, [0.16 * W, 0.12, 0.1, 2, 0.03], 0, -0.36, -0.11));
+    l.add(rbox(armor, [0.19 * W, 0.28, 0.21, 2, 0.04], 0, -0.52, -0.01));
+    l.add(box(glow, 0.012, 0.16, 0.012, sd * 0.1 * W, -0.52, -0.1));
+    l.add(rbox(dark, [0.22 * W, 0.12, 0.32, 2, 0.04], 0, -0.66, -0.05));
+    return l;
+  });
+  g.add(...u.legs);
+  const up = new THREE.Group(); up.position.y = hip; up.userData.y0 = hip; g.add(up); u.upper = up;
+  // pelvis, belt with pouches, abdomen plates
+  up.add(rbox(dark, [0.42 * W, 0.12, 0.27, 2, 0.03], 0, 0.04, 0));
+  for (const sd of [-1, 1]) up.add(rbox(dark, [0.09, 0.1, 0.07, 2, 0.02], sd * 0.17 * W, 0.04, -0.15));
+  up.add(box(suit, 0.34 * W, 0.24, 0.22, 0, 0.2, 0));
+  for (const r of [0, 1]) for (const sd of [-1, 1]) up.add(rbox(armor, [0.12 * W, 0.08, 0.04, 2, 0.015], sd * 0.07 * W, 0.15 + r * 0.1, -0.12));
+  // chest: a wide plate with a V of angled armour, a glowing core and team trim
+  up.add(rbox(armor, [0.56 * W, 0.3, 0.36, 2, 0.06], 0, 0.44, 0));
+  for (const sd of [-1, 1]) { const v = rbox(armor, [0.26 * W, 0.2, 0.06, 2, 0.02], sd * 0.13 * W, 0.42, -0.19); v.rotation.z = sd * 0.35; v.rotation.y = -sd * 0.15; up.add(v); }
+  up.add(box(glow, 0.08, 0.05, 0.02, 0, 0.36, -0.23));
+  for (const sd of [-1, 1]) up.add(box(glow, 0.02, 0.02, 0.32, sd * 0.28 * W, 0.57, 0));
+  up.add(rbox(dark, [0.3, 0.08, 0.26, 2, 0.03], 0, 0.61, 0));
+  // backpack: a power unit with vents and twin exhausts
+  up.add(rbox(dark, [0.44 * W, 0.44, 0.22, 2, 0.05], 0, 0.44, 0.28));
+  for (const sd of [-1, 1]) {
+    up.add(box(glow, 0.05, 0.22, 0.02, sd * 0.12 * W, 0.44, 0.4));
+    const ex = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.16, 10), armor); ex.position.set(sd * 0.13 * W, 0.72, 0.3); up.add(ex);
+  }
+  // pauldrons: two layers, a team stripe along the top
+  for (const sd of [-1, 1]) {
+    const p1 = rbox(armor, [0.3 * W, 0.14, 0.36, 2, 0.05], sd * 0.39 * W, 0.6, 0); p1.rotation.z = -sd * 0.22; up.add(p1);
+    const p2 = rbox(armor, [0.26 * W, 0.08, 0.3, 2, 0.03], sd * 0.43 * W, 0.49, 0); p2.rotation.z = -sd * 0.32; up.add(p2);
+    const st = box(glow, 0.03, 0.03, 0.34, sd * 0.5 * W, 0.6, 0); st.rotation.z = -sd * 0.22; up.add(st);
+  }
+  if (type === 'sniper') { const cloak = box(toon({ color: 0x5a4c3a, roughness: 0.95, metalness: 0 }), 0.5, 0.62, 0.04, 0, 0.3, 0.41); cloak.rotation.x = 0.12; up.add(cloak); }
+  if (type === 'heavy') up.add(rbox(armor, [0.44, 0.16, 0.34, 2, 0.05], 0, 0.7, 0.02)); // armoured gorget
+  // helmet: rounded shell, crest ridge, jaw guard, slanted visor, ear modules
+  const headY = 0.84;
+  up.add(rbox(armor, [0.3, 0.3, 0.34, 3, 0.09], 0, headY, 0));
+  up.add(rbox(armor, [0.06, 0.06, 0.3, 2, 0.02], 0, headY + 0.15, 0.01));
+  up.add(rbox(dark, [0.22, 0.1, 0.08, 2, 0.03], 0, headY - 0.1, -0.15));
+  const vis = box(visorMat, 0.26, 0.065, 0.04, 0, headY + 0.02, -0.17); vis.rotation.x = 0.15; up.add(vis);
+  for (const sd of [-1, 1]) { const e = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 12), dark); e.rotation.z = Math.PI / 2; e.position.set(sd * 0.16, headY - 0.02, 0.02); up.add(e); up.add(box(glow, 0.02, 0.02, 0.02, sd * 0.185, headY - 0.02, 0.02)); }
+  // arms: suit sleeve, gauntlet, aiming the gun forward
+  u.arms = [-1, 1].map(sd => {
+    const a = new THREE.Group(); a.position.set(sd * 0.29 * W, 0.56, 0);
+    a.add(box(suit, 0.11 * W, 0.46, 0.12, 0, -0.23, 0));
+    a.add(rbox(armor, [0.14 * W, 0.18, 0.15, 2, 0.03], 0, -0.32, 0));
+    a.add(rbox(dark, [0.1, 0.08, 0.11, 2, 0.02], 0, -0.46, 0));
+    a.rotation.x = -1.15; a.rotation.z = -sd * (sd < 0 ? 0.45 : 0.2); return a;
+  });
+  up.add(...u.arms);
+  // the gun
+  const gun = new THREE.Group(); gun.position.set(0.12, 0.45, -0.3); up.add(gun);
+  const gunLen = { heavy: 0.95, sniper: 1.3 }[type] || 0.8;
+  gun.add(rbox(dark, [0.1, 0.15, 0.42, 2, 0.02], 0, 0, -0.02));                      // receiver
+  gun.add(box(dark, 0.07, 0.07, 0.16, 0, -0.02, 0.24));                                 // stock
+  const mag = box(dark, 0.06, 0.16, 0.08, 0, -0.13, -0.08); mag.rotation.x = 0.2; gun.add(mag);
+  gun.add(box(glow, 0.012, 0.03, 0.2, 0.052, 0.02, -0.05));                             // energy cell
+  if (type === 'heavy') { // rotary barrels and an ammo drum
+    for (let k = 0; k < 3; k++) { const a = k / 3 * Math.PI * 2, b = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.55, 6), dark); b.rotation.x = Math.PI / 2; b.position.set(Math.cos(a) * 0.045, Math.sin(a) * 0.045, -gunLen + 0.2); gun.add(b); }
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.12, 14), armor); drum.rotation.z = Math.PI / 2; drum.position.set(0, -0.14, 0.02); gun.add(drum);
+  } else {
+    const br = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, gunLen - 0.3, 8), dark); br.rotation.x = Math.PI / 2; br.position.set(0, 0.02, -0.2 - (gunLen - 0.3) / 2); gun.add(br);
+    gun.add(rbox(armor, [0.08, 0.08, 0.26, 2, 0.02], 0, 0.02, -0.32));                  // handguard
+    if (type === 'sniper') { const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.32, 10), dark); sc.rotation.x = Math.PI / 2; sc.position.set(0, 0.12, -0.05); gun.add(sc); gun.add(box(visorMat, 0.05, 0.05, 0.01, 0, 0.12, -0.21)); }
+    else gun.add(box(dark, 0.04, 0.05, 0.1, 0, 0.11, -0.04));                            // sight
+  }
+  u.gun = gun;
+  u.muzzleOffset = { side: 0.12, fwd: gunLen + 0.2, y: hip + 0.45 };
+  u.feet = u.legs; u.wings = u.arms;
+  const head = new THREE.Group(); head.position.set(0, headY, 0); up.add(head); u.head = head;
+  for (const m of [...up.children]) if (m !== head && m.position.y >= headY - 0.12 && !(m.position.z > 0.25)) head.attach(m);
+  head.scale.setScalar(1.12); u.headY0 = headY;
+  if (type === 'heavy') g.scale.setScalar(1.06);
+}
 function buildMarine(u, g, type, team) {
+  if (MARINE_STYLE === 'power') { buildPowerMarine(u, g, type, team); return; }
   const armor = toon({ color: ARMOR[type], roughness: 0.45, metalness: 0.2, normalMap: plateTex.nrm, normalScale: new THREE.Vector2(0.4, 0.4) });
   u.bodyMat = armor;
   const big = type === 'heavy' ? 1.25 : 1, tall = type === 'sniper' ? 1.06 : 1;
