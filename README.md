@@ -71,7 +71,7 @@ Each marine you control has two abilities on cooldowns and an ultimate (★) tha
 |---|---|---|---|
 | Marine | Frag grenade | Combat roll: quick dash, can't be hit | Drone swarm: 5 drones hunt aliens and detonate |
 | Juggernaut | Energy wall: blocks swarm fire in front of you | Shield charge: knocks aliens over and stuns them | Shockwave: stuns every alien in a cone for 3s |
-| Ranger | Scope (headshots x2.5) | Jump jet: leap onto containers and huts | Recon scan: aliens marked through walls, shots pierce |
+| Ranger | Scope (precision hits x2.8) | Jump jet: leap onto containers and huts | Recon scan: aliens marked through walls, shots pierce |
 
 ## Tactics mode (turn-based + tower defense)
 
@@ -111,6 +111,8 @@ Three graphics levels (menu toggle, saved): **Ultra** (default on desktop) adds 
 An original, dark cinematic score synthesized live with WebAudio (no audio files): a low drone and a string ensemble in a big hall reverb over a slow D-minor progression, a pulsing low ostinato with distant sonar pings in the field, and war drums with brass swells once aliens close in on your squad. Toggle it on the title screen.
 
 Guns in first person have aim down sights (right mouse; the Ranger keeps its scope), magazines and reloads (**R**), recoil, brass, a muzzle light and layered gunshots.
+Each class has its own gun: the Marine fires a 3-round pulse rifle, the Heavy a pump shotgun, the Ranger a rail rifle and the elite an auto rifle. Every gun has precision hits: shoot an alien's head, eyes or horns for bigger yellow damage numbers and a bright ping. Recoil climbs straight up and settles fast, near misses bend onto the body (more on touch), and the last alien you hit shows a health bar that drains in two steps.
+On the turn-based map your marines are drawn twice as big so you can find them on a phone.
 
 ## Code map
 

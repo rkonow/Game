@@ -694,6 +694,7 @@ const ALIEN_MODEL = { burrower: 'trooper', shielder: 'heavy' };
 function tagMeshes(group, ent) {
   group.traverse(o => { o.userData.entity = ent; if (o.isMesh) o.castShadow = true; });
 }
+const prec = m => { m.userData.prec = true; return m; }; // a precision (crit) spot: heads, eyes, mandibles, horns
 function blob(mat, sx, sy, sz, x, y, z) {
   const m = new THREE.Mesh(sphere, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); return m;
 }
@@ -772,22 +773,22 @@ function buildAlien(u, g, type) {
     up.add(blob(shell, 0.42, 0.36, 0.55, 0, L, 0.3));                // abdomen
     const sac = blob(acidMat, 0.3, 0.3, 0.34, 0, L + 0.35, 0.4); up.add(sac); u.sac = sac; // glowing acid sac
     const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 0.9, 8), shell); neck.position.set(0, L + 0.45, -0.25); neck.rotation.x = -0.5; up.add(neck);
-    up.add(blob(shell, 0.2, 0.18, 0.3, 0, L + 0.85, -0.5));           // head
+    up.add(prec(blob(shell, 0.2, 0.18, 0.3, 0, L + 0.85, -0.5)));     // head
   } else {
     const s = heavyish ? 1.5 : 1;
     up.add(blob(shell, 0.42 * s, 0.32 * s, 0.6 * s, 0, L, 0.35 * s));      // abdomen
     up.add(blob(belly, 0.36 * s, 0.22 * s, 0.5 * s, 0, L - 0.12 * s, 0.32 * s));
     up.add(blob(shell, 0.32 * s, 0.28 * s, 0.34 * s, 0, L + 0.05 * s, -0.12 * s)); // thorax
-    up.add(blob(shell, 0.22 * s, 0.2 * s, 0.24 * s, 0, L + 0.08 * s, -0.5 * s));  // head
+    up.add(prec(blob(shell, 0.22 * s, 0.2 * s, 0.24 * s, 0, L + 0.08 * s, -0.5 * s)));  // head
     for (let k = 0; k < (heavyish ? 4 : 3); k++) up.add(blob(shell, 0.08 * s, 0.14 * s, 0.1 * s, 0, L + 0.3 * s, 0.1 * s + k * 0.22 * s)); // dorsal spines
-    if (heavyish) for (const sd of [-1, 1]) { const horn = new THREE.Mesh(new THREE.ConeGeometry(0.07 * s, 0.5 * s, 6), toon({ color: 0xd8c8b0, roughness: 0.4 })); horn.position.set(sd * 0.16 * s, L + 0.25 * s, -0.62 * s); horn.rotation.set(-1.0, 0, sd * 0.3); up.add(horn); }
+    if (heavyish) for (const sd of [-1, 1]) { const horn = new THREE.Mesh(new THREE.ConeGeometry(0.07 * s, 0.5 * s, 6), toon({ color: 0xd8c8b0, roughness: 0.4 })); horn.position.set(sd * 0.16 * s, L + 0.25 * s, -0.62 * s); horn.rotation.set(-1.0, 0, sd * 0.3); up.add(prec(horn)); }
   }
   // glowing eyes and mandibles
   const hz = type === 'sniper' ? -0.72 : heavyish ? -0.82 : -0.62, hy = type === 'sniper' ? L + 0.88 : L + (heavyish ? 0.15 : 0.1);
   u.eyes = [];
   for (const sd of [-1, 1]) {
-    const e = blob(eyeGlow[elite ? 1 : 0], 0.045, 0.035, 0.03, sd * (heavyish ? 0.13 : 0.09), hy + 0.04, hz + (heavyish ? 0.1 : 0.08)); up.add(e); u.eyes.push(e);
-    const m = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.22, 5), legMat); m.position.set(sd * 0.06, hy - 0.08, hz); m.rotation.set(-Math.PI / 2 - 0.3, 0, sd * 0.4); up.add(m);
+    const e = blob(eyeGlow[elite ? 1 : 0], 0.045, 0.035, 0.03, sd * (heavyish ? 0.13 : 0.09), hy + 0.04, hz + (heavyish ? 0.1 : 0.08)); up.add(prec(e)); u.eyes.push(e);
+    const m = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.22, 5), legMat); m.position.set(sd * 0.06, hy - 0.08, hz); m.rotation.set(-Math.PI / 2 - 0.3, 0, sd * 0.4); up.add(prec(m));
   }
   // legs: three per side (two for the brutes, thicker), grouped per side so they scuttle in turn
   const sides = [-1, 1].map(sd => {
@@ -1288,6 +1289,23 @@ function updateKO(dt) {
 
 // floating damage numbers (first person only)
 const dmgNums = [];
+// bullet magnetism: the visible enemy closest to the shot, if it is within a small cone
+function magnetTarget(u, ray, cone) {
+  let best = null, bd = cone;
+  for (const e of entities) {
+    if (e.dead || e.team === u.team || e.isBase || hiddenFoe(e)) continue;
+    const v = new THREE.Vector3(e.x, 0.6 * (e.baseScale || 1), e.z).sub(ray.origin), d = v.length();
+    if (d > 45 || d < 0.5) continue;
+    const ang = v.normalize().angleTo(ray.direction) - 0.35 / d; // bigger bodies up close
+    if (ang < bd) { bd = ang; best = e; }
+  }
+  return best;
+}
+// a kill in first person: the alien bursts into light
+function killPop(e, crit) {
+  burst(e.x, 1, e.z, crit ? 1.1 : 0.8, crit ? 0xffe27a : 0xfff2c0);
+  feathers(e.x, e.z, 0x7aff3a, crit ? 10 : 6);
+}
 function dmgNumber(p, amount, crit) {
   dmgNums.push({ x: p.x, y: p.y + 0.3, z: p.z, text: String(Math.round(amount)), life: 0.8, crit, dx: (Math.random() - 0.5) * 30 });
   if (dmgNums.length > 40) dmgNums.shift();
@@ -1452,9 +1470,10 @@ function gunSound(kind) {
   const pitch = 0.94 + Math.random() * 0.12;
   if (kind === 'trooper' || kind === 'elite') {
     noise('highpass', 5000, 0.7, 0.5, 0.025, 1.6);           // crack
-    noise('bandpass', 1300 * pitch, 1.2, 0.9, 0.09, 1.2);   // body
-    tone('sine', 150, 50, 0.6, 0.09);                         // thump
-    tone('sawtooth', 1800 * pitch, 260, 0.12, 0.07);          // plasma zap
+    noise('bandpass', 1100 * pitch, 1.1, 1.0, 0.1, 1.1);    // body
+    tone('sine', 140, 45, 0.85, 0.1);                         // chest thump
+    tone('square', 420 * pitch, 160, 0.07, 0.05);             // mechanical clack
+    tone('sawtooth', 1800 * pitch, 260, 0.08, 0.06);          // energy zap
   } else if (kind === 'heavy') {
     noise('highpass', 3000, 0.7, 0.6, 0.04, 1.2);
     noise('lowpass', 900, 0.8, 1.4, 0.32, 0.7);
@@ -1465,6 +1484,9 @@ function gunSound(kind) {
     noise('bandpass', 900 * pitch, 0.9, 1.2, 0.35, 1);
     tone('sine', 130, 38, 0.9, 0.22);
     tone('sawtooth', 3200, 400, 0.15, 0.16);                 // rail whine
+  } else if (kind === 'crit') { // precision hit: a bright ping you learn to chase
+    out.disconnect(rv); out.gain.value = 0.38;
+    tone('triangle', 2350, 2300, 0.28, 0.09); tone('sine', 3500, 3400, 0.12, 0.06); noise('bandpass', 4200, 3, 0.35, 0.03, 1.8);
   } else if (kind === 'hit') {
     out.disconnect(rv); out.gain.value = 0.35;
     noise('bandpass', 2600, 2, 0.6, 0.05, 1.5); tone('triangle', 900, 600, 0.2, 0.05);
@@ -1549,14 +1571,19 @@ const fps = {
   ads: 0, adsWant: false, reloadT: 0, reloadMax: 1,
   yaw: 0, pitch: 0, firing: false, bob: 0, hitMarker: 0, killMarker: 0, hurt: 0, flash: 0, stickX: 0, stickY: 0, scoped: false,
   recoil: 0, vmKick: 0, shake: 0, bloom: 0, vx: 0, vz: 0, swayX: 0, swayY: 0, lastYaw: 0, lastPitch: 0,
+  burstLeft: 0, critMarker: 0, target: null,
 };
-// first-person guns (you only): fast and punchy. Damage already includes the hero bonus.
+// first-person guns (you only). Every gun has precision hits (aim for the head: bigger, yellow numbers and a
+// bright ping), predictable mostly-vertical recoil that settles fast, and bullet magnetism that bends near misses
+// onto the body. trooper = 3-round pulse rifle, heavy = pump shotgun, sniper = precision rail, elite = auto rifle.
 const GUNS = {
-  trooper: { rate: 0.09, dmg: 6, spread: 0.012, pellets: 1, kick: 0.010, shake: 0.025, speed: 120, sound: 'pop' },
-  heavy: { rate: 0.55, dmg: 10, spread: 0.065, pellets: 7, kick: 0.05, shake: 0.14, speed: 95, sound: 'blast' },
-  sniper: { rate: 0.85, dmg: 65, spread: 0.025, pellets: 1, kick: 0.07, shake: 0.08, speed: 220, sound: 'crack' },
-  elite: { rate: 0.12, dmg: 8, spread: 0.015, pellets: 1, kick: 0.012, shake: 0.03, speed: 120, sound: 'pop' },
+  trooper: { name: 'Pulse rifle', rate: 0.3, burst: 3, burstGap: 0.065, dmg: 9, prec: 1.7, spread: 0.007, pellets: 1, kick: 0.009, drift: 0.0015, shake: 0.03, speed: 140, magnet: 0.03 },
+  heavy: { name: 'Shotgun', rate: 0.62, dmg: 9, prec: 1.4, spread: 0.06, pellets: 8, kick: 0.06, drift: 0, shake: 0.18, speed: 110, magnet: 0 },
+  sniper: { name: 'Rail rifle', rate: 0.85, dmg: 60, prec: 2.8, spread: 0.02, pellets: 1, kick: 0.075, drift: 0.004, shake: 0.09, speed: 260, magnet: 0.02 },
+  elite: { name: 'Auto rifle', rate: 0.085, dmg: 6, prec: 1.5, spread: 0.012, pellets: 1, kick: 0.007, drift: 0.001, shake: 0.022, speed: 140, magnet: 0.025 },
 };
+// health bar height over an alien in first person
+const barY = e => (e.type === 'sniper' ? 2.0 : e.type === 'heavy' || e.type === 'elite' || e.type === 'shielder' ? 1.7 : 1.15) * (e.baseScale || 1);
 let trans = null;            // camera transition
 // Tactics mode: plan with the game paused, then ROUND_TIME seconds of live combat.
 const ROUND_TIME = 20;
@@ -2227,7 +2254,7 @@ function possess(u) {
   u.possessed = true; u.order = { type: 'idle' }; u.path = null;
   u.mesh.visible = false;
   fps.yaw = u.facing; fps.pitch = -0.05; fps.firing = false; setScoped(false);
-  fps.vx = fps.vz = fps.recoil = fps.bloom = fps.vy = 0; fps.dash = null; u.y = 0; fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
+  fps.vx = fps.vz = fps.recoil = fps.bloom = fps.vy = fps.burstLeft = 0; fps.target = null; fps.dash = null; u.y = 0; fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
   viewmodel.userData.wing.material.color.copy(u.bodyMat.color).multiplyScalar(0.7);
   setViewGun(u.type);
   if (u.ammo === undefined) u.ammo = viewmodel.userData.kit.mag;
@@ -2452,31 +2479,43 @@ function playerShoot(u) {
   const gun = GUNS[u.type];
   const kit = viewmodel.userData.kit;
   if (fps.reloadT > 0) return;
-  if (u.ammo <= 0) { startReload(u); return; }
+  if (u.ammo <= 0) { fps.burstLeft = 0; startReload(u); return; }
   u.ammo--;
-  u.cool += gun.rate; if (u.cool < 0) u.cool = 0; // keeps the fire rate exact at any frame rate
+  if (gun.burst) { if (!(fps.burstLeft > 0)) fps.burstLeft = gun.burst; fps.burstLeft--; }
+  u.cool += gun.burst && fps.burstLeft > 0 ? gun.burstGap : gun.rate; if (u.cool < 0) u.cool = 0; // keeps the fire rate exact at any frame rate
   camera.updateMatrixWorld(true);
   const targets = (hawk.t > 0 ? [ground] : staticShootables).concat(entities.filter(e => !e.dead && !e.possessed).map(e => e.mesh));
   const mz = fps.scoped ? camera.position.clone().add(new THREE.Vector3(0, -0.15, 0)) : viewmodel.userData.muzzle.getWorldPosition(new THREE.Vector3());
   const spreadBase = fps.scoped ? 0.0008 : gun.spread * (1 + fps.bloom * 1.5) * (1 - 0.65 * fps.ads);
-  let hits = 0, killed = false;
+  let hits = 0, killed = false, crits = 0;
   for (let i = 0; i < gun.pellets; i++) {
     const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * spreadBase;
     raycaster.setFromCamera({ x: Math.cos(a) * r, y: Math.sin(a) * r }, camera);
     raycaster.far = 120;
-    const hit = raycaster.intersectObjects(targets, true)[0];
+    let hit = raycaster.intersectObjects(targets, true)[0];
+    if (gun.magnet && !(hit && hit.object.userData.entity && hit.object.userData.entity.team !== u.team)) { // bullet magnetism
+      const m = magnetTarget(u, raycaster.ray, gun.magnet * (isTouch ? 1.6 : 1) * (1 + fps.ads * 0.4));
+      if (m) {
+        const o = raycaster.ray.origin.clone(), dir = new THREE.Vector3(m.x, 0.6 * (m.baseScale || 1), m.z).sub(o).normalize();
+        raycaster.set(o, dir);
+        const h2 = raycaster.intersectObjects(targets, true)[0];
+        if (h2 && h2.object.userData.entity === m) hit = h2;
+      }
+    }
     const end = hit ? hit.point.clone() : raycaster.ray.at(120, new THREE.Vector3());
     const ent = hit && hit.object.userData.entity;
     const enemy = ent && ent.team !== u.team ? ent : null;
     if (enemy) {
       let dmg = gun.dmg;
-      const crit = u.type === 'sniper' && !enemy.isBase && hit.point.y > 1.25 * (enemy.elite ? 1.3 : 1);
-      if (crit) { dmg *= 2.5; toast('Headshot!', 0.6); }
+      const crit = !!hit.object.userData.prec;
+      if (crit) { dmg *= gun.prec; crits++; }
+      const hpBefore = enemy.hp;
       const wasShielded = enemy.isBase && enemy.shield;
       damage(enemy, dmg, u);
       if (!wasShielded) dmgNumber(end, dmg, crit);
-      if (enemy.dead) { killed = true; chargeUlt(u, 10); }
+      if (enemy.dead) { killed = true; chargeUlt(u, 10); killPop(enemy, crit); }
       hits++;
+      if (!enemy.isBase) fps.target = { e: enemy, t: 2.2, trail: Math.max(fps.target && fps.target.e === enemy ? fps.target.trail : 0, hpBefore / enemy.maxHp) };
       if (!enemy.isBase && !enemy.dead) { // knockback
         const k = Math.min(0.35, dmg * 0.012);
         enemy.x += raycaster.ray.direction.x * k; enemy.z += raycaster.ray.direction.z * k;
@@ -2490,20 +2529,21 @@ function playerShoot(u) {
       else { impactPuff(end, surf, gun.pellets > 1 ? 2 : 4); if (surf !== 0x8a5a3c) burst(end.x, end.y, end.z, 0.16, 0xffc070); } // sparks off metal
     }, gun.pellets > 1 ? 0.8 : 1.2);
   }
-  if (hits) { fps.hitMarker = 0.12; gunSound(killed ? 'kill' : 'hit'); }
-  if (killed) fps.killMarker = 0.45;
+  if (hits) { fps.hitMarker = 0.14; fps.critMarker = crits ? 0.18 : 0; gunSound(killed ? 'kill' : crits ? 'crit' : 'hit'); }
+  if (killed) fps.killMarker = 0.5;
   viewmodel.userData.flashLight.intensity = gun.pellets > 1 ? 9 : 6;
   // feel: flash, light, kick, shake, bloom, a popcorn shell
   const fl = viewmodel.userData.flash;
   fl.visible = true; fl.scale.setScalar((gun.pellets > 1 ? 1.8 : 1) * (0.8 + Math.random() * 0.7)); fl.rotation.z = Math.random() * 6;
   fps.flash = 0.05;
   const steady = 1 - 0.45 * fps.ads;
-  fps.recoil += gun.kick * (0.7 + Math.random() * 0.6) * steady;
-  fps.yaw += (Math.random() - 0.5) * gun.kick * 0.5 * steady;
+  // predictable recoil: straight up with a small, consistent drift to the right, settling back fast
+  fps.recoil += gun.kick * (0.9 + Math.random() * 0.2) * steady;
+  fps.yaw -= (gun.drift + (Math.random() - 0.5) * gun.kick * 0.12) * steady;
   fps.vmRoll = (Math.random() - 0.5) * 0.12;
   fps.vmKick = Math.min(1.5, fps.vmKick + (gun.pellets > 1 ? 1.4 : u.type === 'sniper' ? 1.2 : 0.55));
   fps.shake = Math.min(0.3, fps.shake + gun.shake);
-  fps.bloom = Math.min(1, fps.bloom + (u.type === 'trooper' ? 0.12 : 0.5));
+  fps.bloom = Math.min(1, fps.bloom + (u.type === 'trooper' || u.type === 'elite' ? 0.08 : 0.5));
   if (!fps.scoped) { // a hot casing flips out of the ejection port
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
     const port = viewmodel.userData.port.getWorldPosition(new THREE.Vector3());
@@ -2563,7 +2603,7 @@ function updateFPS(dt, simDt) {
   if (v > 0.3) fps.bob += simDt * 9 * Math.min(1, v / sp);
   if (isTouch && fps.firing) aimAssist(dt);
   if (fps.reloadT > 0) { fps.reloadT -= dt; if (fps.reloadT <= 0) { u.ammo = viewmodel.userData.kit.mag; gunSound('ready'); } }
-  if (fps.firing && fps.reloadT <= 0) { let n = 0; while (u.cool <= 0 && n++ < 3) playerShoot(u); } // catch up on slow frames
+  if ((fps.firing || fps.burstLeft > 0) && fps.reloadT <= 0) { let n = 0; while (u.cool <= 0 && n++ < 3 && (fps.firing || fps.burstLeft > 0)) playerShoot(u); } // catch up on slow frames; a burst always finishes
   else if (u.cool < 0) u.cool = 0;
 }
 
@@ -2711,7 +2751,7 @@ function pickEntity(sx, sy) {
   const tol = isTouch ? 38 : 26;
   for (const e of entities) {
     if (e.dead || hiddenFoe(e)) continue;
-    const s = toScreen(e.x, e.isBase ? 1.6 : 0.8, e.z);
+    const s = toScreen(e.x, e.isBase ? 1.6 : 0.8 * (e.big || 1), e.z);
     if (s.behind) continue;
     const d = Math.hypot(s.x - sx, s.y - sy) - (e.isBase ? 45 : 0);
     if (d < tol && d < bd) { bd = d; best = e; }
@@ -3523,10 +3563,24 @@ function drawOverlay() {
     const cx = innerWidth / 2, cy = innerHeight / 2;
     const kill = fps.killMarker > 0;
     const g = kill ? 1 + (0.45 - fps.killMarker) * 1.5 : 1;
-    octx.strokeStyle = kill ? '#ff4a3a' : '#ffffff'; octx.lineWidth = kill ? 3 : 2;
+    octx.strokeStyle = kill ? '#ff4a3a' : fps.critMarker > 0 ? '#ffd84a' : '#ffffff'; octx.lineWidth = kill ? 3.5 : fps.critMarker > 0 ? 3 : 2;
     octx.beginPath();
     for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { octx.moveTo(cx + a * 7 * g, cy + b * 7 * g); octx.lineTo(cx + a * 15 * g, cy + b * 15 * g); }
     octx.stroke();
+  }
+  if (mode === 'fps' && fps.target && fps.target.t > 0) { // the last thing you shot: a health bar that drains in two steps
+    const T = fps.target, e = T.e;
+    if (!e.dead) {
+      const s = toScreen(e.x, barY(e), e.z);
+      if (!s.behind) {
+        const w = 54, hpf = Math.max(0, e.hp / e.maxHp);
+        octx.globalAlpha = Math.min(1, T.t * 2);
+        octx.fillStyle = 'rgba(0,0,0,.6)'; octx.fillRect(s.x - w / 2 - 1, s.y - 1, w + 2, 7);
+        octx.fillStyle = '#ffffff'; octx.fillRect(s.x - w / 2, s.y, w * T.trail, 5);
+        octx.fillStyle = e.elite || e.type === 'elite' ? '#ffb020' : '#ff5a3c'; octx.fillRect(s.x - w / 2, s.y, w * hpf, 5);
+        octx.globalAlpha = 1;
+      }
+    }
   }
   {
     octx.textAlign = 'center';
@@ -3538,7 +3592,7 @@ function drawOverlay() {
       octx.font = `900 ${n.crit ? 22 : 15}px system-ui`;
       octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.7)';
       octx.strokeText(n.text, s.x + n.dx * (0.8 - n.life), s.y);
-      octx.fillStyle = n.color || (n.crit ? '#ff5a3c' : '#fff07a');
+      octx.fillStyle = n.color || (n.crit ? '#ffd84a' : '#f4f6f8');
       octx.fillText(n.text, s.x + n.dx * (0.8 - n.life), s.y);
     }
     octx.globalAlpha = 1;
@@ -3738,6 +3792,7 @@ function bark(u, kind) {
 const tbMine = () => entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower);
 const tbFoes = () => entities.filter(e => !e.dead && e.team === ENEMY && !e.isBase);
 
+const TB_MARINE_SCALE = 2;
 function startTurns() {
   turn.on = true; turn.n = 1; turn.side = 'player';
   document.body.classList.add('xcom');
@@ -4303,7 +4358,7 @@ function drawTurnUI() {
   // every marine: action point pips, overwatch and hunker icons
   octx.textAlign = 'center';
   for (const m of tbMine()) {
-    const s = toScreen(m.x, 2.45, m.z); if (s.behind) continue;
+    const s = toScreen(m.x, 2.45 + 1.9 * ((m.big || 1) - 1), m.z); if (s.behind) continue;
     octx.font = '900 12px system-ui'; octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.7)';
     const tag = (m.ow ? '👁 ' : '') + (m.hunker ? '🛡 ' : '') + (turn.side === 'player' ? '●'.repeat(Math.max(0, m.ap)) + '○'.repeat(Math.max(0, 2 - m.ap)) : '');
     octx.strokeText(tag, s.x, s.y); octx.fillStyle = m === u ? '#9dffc4' : '#cfe8ff'; octx.fillText(tag, s.x, s.y);
@@ -4583,12 +4638,12 @@ function launchMission(i, pick, checkpoint = 0) {
   // swap the default squad for the marines you picked
   for (const e of entities) if (e.team === PLAYER && !e.isBase && !e.isTower) { e.dead = true; scene.remove(e.mesh); }
   entities = entities.filter(e => !e.dead);
-  let spots = [[-3, 17], [3, 17], [-1, 17], [1, 17], [-2, 19], [2, 19], [0, 19], [-4, 19]];
+  let spots = [[-4.5, 17], [4.5, 17], [-1.5, 17], [1.5, 17], [-3, 19.5], [3, 19.5], [0, 19.5], [-6, 19.5]]; // roomy: marines are drawn big in turns
   if (m.story) { // the swarm here is scripted: clear the default aliens and start at the checkpoint
     for (const e of entities) if (e.team === ENEMY && !e.isBase) { e.dead = true; scene.remove(e.mesh); }
     entities = entities.filter(e => !e.dead);
     const [cx, cz] = STORIES[m.story][checkpoint].cp;
-    spots = [[-1, 0], [1, 0], [0, 1.5], [-1.5, 1.5], [1.5, 1.5], [0, -1.5], [-2, -1], [2, -1]].map(([a, b]) => [cx + a * 1.2, cz + b * 1.2]);
+    spots = [[-1, 0], [1, 0], [0, 1.5], [-1.5, 1.5], [1.5, 1.5], [0, -1.5], [-2, -1], [2, -1]].map(([a, b]) => [cx + a * 1.6, cz + b * 1.6]);
   }
   camp.deployed = [];
   pick.forEach((id, k) => {
@@ -4981,7 +5036,11 @@ function frame(now) {
     if (e.dead) continue;
     if (e.isBase) { e.bodyMat.emissive.setHex(e.flash > 0 ? 0x552211 : 0); e.flash -= dt; continue; }
     e.mesh.position.set(e.x, 0, e.z);
-    { const q = Math.max(0, e.flash) * 1.4, b = e.baseScale || 1; e.mesh.scale.set(b * (1 + q), b * (1 - q), b * (1 + q)); } // squash when hit
+    if (e.team === PLAYER && !e.isTower) { // on the turn map your marines are drawn twice as big so you can find them on a phone
+      const want = turn.on && !turn.live && mode === 'rts' ? TB_MARINE_SCALE : 1;
+      e.big = (e.big || 1) + (want - (e.big || 1)) * Math.min(1, dt * 8);
+    }
+    { const q = Math.max(0, e.flash) * 1.4, b = (e.baseScale || 1) * (e.big || 1); e.mesh.scale.set(b * (1 + q), b * (1 - q), b * (1 + q)); } // squash when hit
     if (e.upper && !(tac.on && tac.phase === 'plan')) animateBird(e, dt, now);
     e.mesh.rotation.y = e.facing;
     // in first person, a squadmate brushing past the camera would fill the screen with armour for a frame: hide anyone that close
@@ -4994,7 +5053,8 @@ function frame(now) {
     e.flash -= dt;
   }
   for (const p of points) { p.flag.rotation.y = now / 600 + p.x; p.flag.position.y = 1.25 + Math.sin(now / 400 + p.x) * 0.1; p.halo.rotation.z = -now / 900; p.halo.position.y = p.flag.position.y; }
-  fps.hitMarker -= dt;
+  fps.hitMarker -= dt; fps.critMarker -= dt;
+  if (fps.target) { fps.target.t -= dt; if (fps.target.t < 1.7) fps.target.trail = Math.max(fps.target.e.hp / fps.target.e.maxHp, fps.target.trail - dt * 0.8); if (fps.target.t <= 0 || fps.target.e.dead) fps.target = null; }
   fps.killMarker -= dt;
   updateDebris(dt);
   for (let i = dmgNums.length - 1; i >= 0; i--) { dmgNums[i].life -= dt; if (dmgNums[i].life <= 0) dmgNums.splice(i, 1); }
@@ -5023,5 +5083,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
-  turn, tbDropIn, tbEndTurn, turnTap, shotInfo, tbOverwatch, tbGrenadeTool, tbMove, pickSpot, bestShot, tbLOS, coverFrom, alienAct, findPath, boxes, loot, scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
+  dmgNums, raycaster, turn, tbDropIn, tbEndTurn, turnTap, shotInfo, tbOverwatch, tbGrenadeTool, tbMove, pickSpot, bestShot, tbLOS, coverFrom, alienAct, findPath, boxes, loot, scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
 };
