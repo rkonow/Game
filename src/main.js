@@ -125,16 +125,16 @@ scene.add(camera);
   scene.environmentIntensity = 0.8;
   pm.dispose();
 }
-scene.add(new THREE.HemisphereLight(0x8f86b8, 0x5a3a28, 0.55));
+const hemi = new THREE.HemisphereLight(0x8f86b8, 0x5a3a28, 0.55); hemi.layers.enable(1); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffc89a, 3.4);
-sun.position.copy(SUN_DIR).multiplyScalar(60);
+sun.position.copy(SUN_DIR).multiplyScalar(60); sun.layers.enable(1);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.04; sun.shadow.radius = 3;
 Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 140 });
 scene.add(sun);
 const rim = new THREE.DirectionalLight(0x6f8cff, 0.7); // cool bounce from the opposite side
-rim.position.set(30, 20, 40);
+rim.position.set(30, 20, 40); rim.layers.enable(1);
 scene.add(rim);
 
 // ---------------------------------------------------------------- post-processing: bloom + colour grade + vignette
@@ -158,6 +158,13 @@ aoPass.blendIntensity = 0.85;
 aoPass.updateGtaoMaterial({ radius: 0.7, distanceExponent: 1.6, thickness: 1.2, scale: 1.1, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
 aoPass.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
 composer.addPass(aoPass);
+// the gun and hands live on layer 1 and are drawn by their own camera with a fixed FOV,
+// so a wide world FOV never stretches the weapon (the classic viewmodel trick)
+const vmCam = new THREE.PerspectiveCamera(52, 1, 0.01, 10); vmCam.layers.set(1); camera.add(vmCam);
+const vmPass = new RenderPass(scene, vmCam); vmPass.clear = false; vmPass.clearDepth = true;
+const vmRender = vmPass.render.bind(vmPass);
+vmPass.render = (...a) => { const bg = scene.background; scene.background = null; vmRender(...a); scene.background = bg; }; // the sky is already drawn
+composer.addPass(vmPass);
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.45, 0.92);
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
@@ -206,7 +213,13 @@ function followShadows() {
 }
 function renderFrame(dt) {
   followShadows();
-  if (!gfx.fancy) { renderer.render(scene, camera); return; }
+  vmCam.aspect = camera.aspect; vmCam.fov = camera.aspect < 1 ? 56 : 50; vmCam.updateProjectionMatrix();
+  vmPass.enabled = viewmodel.visible;
+  if (!gfx.fancy) {
+    renderer.render(scene, camera);
+    if (viewmodel.visible) { const bg = scene.background; scene.background = null; renderer.autoClear = false; renderer.clearDepth(); renderer.render(scene, vmCam); renderer.autoClear = true; scene.background = bg; }
+    return;
+  }
   composer.render(dt);
   // too slow for a few seconds in game? step down a graphics level
   if (gfx.auto && mode !== 'menu') {
@@ -2263,7 +2276,7 @@ const viewmodel = new THREE.Group();
   const glow = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.35, 1.7, 2.8) });
   const lens = new THREE.MeshStandardMaterial({ color: 0x0b1820, emissive: 0x2a6080, emissiveIntensity: 0.35, roughness: 0.02, metalness: 0.5, transparent: true, opacity: 0.55 });
   const reticle = new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 0.5, 0.3) });
-  const sleeve = toon({ color: 0x6b7a66, roughness: 0.5, metalness: 0.45 });
+  const sleeve = toon({ color: 0x3a4048, roughness: 0.78, metalness: 0.12 });
   const glove = toon({ color: 0x24272c, roughness: 0.8, metalness: 0.05 });
   const knuckle = toon({ color: 0x3a3f46, roughness: 0.5, metalness: 0.4 });
   const R = (w, h, d, r = 0.008) => new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2.2, h / 2.2, d / 2.2));
@@ -2283,7 +2296,7 @@ const viewmodel = new THREE.Group();
     box(g, glove, 0.07, 0.055, 0.1, -0.008, foreY - 0.05, foreZ, 0, 0.02);
     box(g, glove, 0.018, 0.02, 0.07, -0.042, foreY - 0.005, foreZ - 0.01, 0, 0.008);
     for (let f = 0; f < 3; f++) box(g, glove, 0.02, 0.02, 0.022, 0.04, foreY - 0.02, foreZ - 0.035 + f * 0.026, 0, 0.008);
-    const s2 = tube(g, sleeve, 0.044, 0.054, 0.38, -0.14, foreY - 0.14, foreZ + 0.13, 12); s2.rotation.set(Math.PI / 2 - 0.6, 0, -0.75);
+    const s2 = tube(g, sleeve, 0.042, 0.05, 0.26, -0.07, foreY - 0.13, foreZ + 0.1, 12); s2.rotation.set(Math.PI / 2 - 0.85, 0, -0.4); // forearm drops down and back, out of the way
   };
   const kits = {};
   { // Marine: compact pulse rifle with a holographic sight
@@ -2383,7 +2396,8 @@ const viewmodel = new THREE.Group();
   viewmodel.position.set(0.22, -0.22, -0.35);
   viewmodel.scale.setScalar(0.8);
   viewmodel.visible = false;
-  viewmodel.traverse(noRay);
+  viewmodel.traverse(o => { noRay(o); o.layers.set(1); });
+  flashLight.layers.enable(0); // the muzzle flash lights the world too
   camera.add(viewmodel);
 }
 function setViewGun(type) {
@@ -2415,7 +2429,7 @@ function possess(u) {
   u.mesh.visible = false;
   fps.yaw = u.facing; fps.pitch = -0.05; fps.firing = false; setScoped(false);
   fps.vx = fps.vz = fps.recoil = fps.bloom = fps.vy = fps.burstLeft = 0; fps.target = null; fps.dash = null; u.y = 0; fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
-  viewmodel.userData.wing.material.color.copy(u.bodyMat.color).multiplyScalar(0.7);
+  viewmodel.userData.wing.material.color.copy(u.bodyMat.color).multiplyScalar(0.28);
   setViewGun(u.type);
   if (u.ammo === undefined) u.ammo = viewmodel.userData.kit.mag;
   fps.reloadT = 0; fps.adsWant = false;
@@ -2803,13 +2817,17 @@ function menuPose() {
   return { pos: dummy.position.clone(), quat: dummy.quaternion.clone(), fov: 46 };
 }
 const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+function fpsFov() { // vertical FOV that gives about 90 degrees across a landscape screen, clamped for portrait
+  const v = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(45)) / Math.max(0.3, camera.aspect)) * 180 / Math.PI;
+  return Math.max(50, Math.min(camera.aspect < 1 ? 74 : 68, v));
+}
 function fpsPose() {
   const u = possessed;
   const bob = Math.sin(fps.bob) * 0.04;
   const sh = fps.shake;
   euler.set(fps.pitch + fps.recoil + (Math.random() - 0.5) * sh * 0.08, fps.yaw + (Math.random() - 0.5) * sh * 0.08, (Math.random() - 0.5) * sh * 0.04);
   const roll = fps.dash && fps.dash.roll ? Math.sin((0.32 - fps.dash.t) / 0.32 * Math.PI) : 0;
-  return { pos: new THREE.Vector3(u.x + (Math.random() - 0.5) * sh * 0.05, (u.y || 0) + EYE + bob - roll * 0.7, u.z), quat: new THREE.Quaternion().setFromEuler(euler), fov: fps.scoped ? 22 : 72 - 20 * fps.ads };
+  return { pos: new THREE.Vector3(u.x + (Math.random() - 0.5) * sh * 0.05, (u.y || 0) + EYE + bob - roll * 0.7, u.z), quat: new THREE.Quaternion().setFromEuler(euler), fov: fps.scoped ? 22 : fpsFov() * (1 - 0.22 * fps.ads) };
 }
 
 function setMode(m, arc = 0) {
@@ -2876,14 +2894,15 @@ function updateCamera(dt) {
   fps.ads += ((fps.reloadT > 0 ? 0 : wantAds) - fps.ads) * Math.min(1, dt * 13);
   const kitNow = viewmodel.userData.kit;
   const rl = fps.reloadT > 0 ? Math.sin(Math.min(1, 1 - fps.reloadT / fps.reloadMax) * Math.PI) : 0;
-  const vs = portrait ? 0.42 : 0.5;
+  const VM = window.__vm || (portrait ? { s: 0.46, x: 0.03, y: -0.135, z: -0.4 } : { s: 0.64, x: 0.12, y: -0.13, z: -0.31 });
+  const vs = VM.s;
   viewmodel.scale.setScalar(vs);
   fps.vmRoll = (fps.vmRoll || 0) * Math.exp(-dt * 12);
   viewmodel.userData.flashLight.intensity *= Math.exp(-dt * 40);
   viewmodel.position.set(
-    (portrait ? 0.09 : 0.17) + fps.swayX + Math.cos(fps.bob * 0.5) * 0.012 * walk,
-    (portrait ? -0.12 : -0.17) + fps.swayY - Math.abs(Math.sin(fps.bob * 0.5)) * 0.014 * walk - fps.vmKick * 0.012,
-    -0.35 + fps.vmKick * 0.07);
+    VM.x + fps.swayX + Math.cos(fps.bob * 0.5) * 0.012 * walk,
+    VM.y + fps.swayY - Math.abs(Math.sin(fps.bob * 0.5)) * 0.014 * walk - fps.vmKick * 0.012,
+    VM.z + fps.vmKick * 0.07);
   const hipX = viewmodel.position.x, hipY = viewmodel.position.y, a = fps.ads;
   viewmodel.position.x = hipX * (1 - a) + fps.swayX * 0.3 * a;
   viewmodel.position.y = hipY * (1 - a) + (-(kitNow ? kitNow.sightY : 0.1) * vs - fps.vmKick * 0.006) * a - rl * 0.12;
