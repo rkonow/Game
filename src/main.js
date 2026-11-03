@@ -13,6 +13,10 @@ import { ShaderPass } from '../vendor/jsm/postprocessing/ShaderPass.js';
 import { GTAOPass } from '../vendor/jsm/postprocessing/GTAOPass.js';
 import { RoundedBoxGeometry } from '../vendor/jsm/geometries/RoundedBoxGeometry.js';
 
+// map spans [-HALF, HALF] on X and Z; campaign missions (launched by a page reload) get a bigger map
+const HALF = (() => { try { return sessionStorage.getItem('hivefall.launch') ? 45 : 30; } catch (e) { return 30; } })();
+const MS = HALF / 30, S = v => v * MS; // map layouts are written for a 60m map and stretched to fit
+
 // ---------------------------------------------------------------- fog of war (turn missions)
 // Every lit material darkens by a small world-space map: black where no marine has looked, dim where
 // they have been, clear where a marine can see right now. It rides on three.js's own fog chunks.
@@ -22,7 +26,7 @@ THREE.ShaderChunk.fog_pars_fragment += '\n#ifdef USE_FOG\nvarying vec2 vFowXZ; u
 THREE.ShaderChunk.fog_fragment += `
 #ifdef USE_FOG
 if (fowOn > 0.5) {
-  vec2 fu = (vFowXZ + 30.0) / 60.0;
+  vec2 fu = (vFowXZ + ${HALF.toFixed(1)}) / ${(HALF * 2).toFixed(1)};
   float inside = step(0.0, fu.x) * step(fu.x, 1.0) * step(0.0, fu.y) * step(fu.y, 1.0);
   float fv = mix(0.3, texture2D(fowMap, fu).r, inside);
   gl_FragColor.rgb = mix(gl_FragColor.rgb * vec3(0.06, 0.08, 0.12), gl_FragColor.rgb, fv);
@@ -31,7 +35,6 @@ if (fowOn > 0.5) {
 `;
 
 // ---------------------------------------------------------------- config
-const HALF = 30;            // map spans [-HALF, HALF] on X and Z
 const N = HALF * 2;         // pathfinding grid cells per side (1 unit each)
 const PLAYER = 0, ENEMY = 1;
 const TEAM_COLORS = [0x3fa9ff, 0xb35cff];
@@ -69,9 +72,21 @@ const STORY_MAPS = {
     ridges: [],
     base: {
       walls: [[-28, 9, 28, 9, [[-18, -14]]], [-28, -10, -28, 9], [28, -10, 28, 9], [-4, -10, -4, 9, [[0, 3]]], [6, -10, 6, 9, [[-1.5, 2.5]]],
-        [-28, -10, 28, -10, [[-24, -20], [-1, 3], [11, 15]]], [-22, -10, -22, -3, [[-7, -5]]], [-28, -3, -22, -3]],
-      floors: [[-16, -0.5, 24, 19], [1, -0.5, 10, 19], [17, -0.5, 22, 19]],
-      lights: [[-16, 1, 0xffb070, 0], [1, -4, 0xff3a2a, 1], [17, -3, 0x9fd0ff, 0], [-25, -7, 0xff3a2a, 1], [13, 6, 0xffb070, 1]],
+        [-28, -10, 28, -10, [[-24, -20], [-1, 3], [11, 15]]], [-22, -10, -22, -3, [[-7, -5]]], [-28, -3, -22, -3],
+        [-10, 1, -10, 9, [[3, 6]]], // crew quarters off the west hall
+        [16, 17, 26, 17, [[19, 22]]], [16, 25, 26, 25], [16, 17, 16, 25, [[20, 22.5]]], [26, 17, 26, 25], // guard post in the south yard
+        [-28, -18, -19, -18, [[-25, -22]]], [-28, -27, -19, -27], [-28, -27, -28, -18], [-19, -27, -19, -18, [[-24, -21]]]], // storage shed up north
+      floors: [[-16, -0.5, 24, 19], [1, -0.5, 10, 19], [17, -0.5, 22, 19], [21, 21, 10, 8], [-23.5, -22.5, 9, 9]],
+      lights: [[-16, 1, 0xffb070, 0], [1, -4, 0xff3a2a, 1], [17, -3, 0x9fd0ff, 0], [-25, -7, 0xff3a2a, 1], [13, 6, 0xffb070, 1],
+        [21, 21, 0xffb070, 1], [-23.5, -22.5, 0x9fd0ff, 0]],
+      // [kind, x, z, turned]: furniture and junk that fills the rooms and yards
+      decor: [['console', -26.5, -1, 1], ['lockers', -16, -9.2, 0], ['pod', -7, 7, 1], ['pod', -7, 3.2, 1], ['lockers', -9.3, -6, 1],
+        ['rack', -2.8, -7, 1], ['rack', 4.8, 6, 1], ['console', 1, -8.6, 0], ['crates', -1, 0, 0],
+        ['barrels', 25, 6, 0], ['tank', 25, -7, 0], ['console', 8, 7.4, 0], ['crates', 15, -8, 0], ['barrels', 23.5, -1, 0],
+        ['wreck', -8, 26, 0], ['barrels', 6, 24, 0], ['solar', -23, 15, 0], ['solar', -23, 24, 0], ['debris', 4, 20, 0], ['debris', -18, 11, 0],
+        ['console', 24.5, 23, 1], ['rack', 18, 23.6, 0], ['crates', 22, 19, 0],
+        ['tank', 24, -15, 0], ['dish', -9, -25, 0], ['barrels', 10, -24, 0], ['solar', 26, -27, 0], ['debris', -6, -16, 0], ['debris', 12, -16, 0],
+        ['crates', -26, -25, 0], ['barrels', -21, -25, 0], ['lockers', -23.5, -19, 0]],
     },
     points: [['R', 2, -17]],
   },
@@ -81,12 +96,23 @@ const STORY_MAP = LAUNCH && LAUNCH.story ? STORY_MAPS[LAUNCH.story] : null;
 const ARENA_BASE = {
   walls: [[-30, 12, 30, 12, [[-3, 3], [-25, -21], [21, 25]]], [-30, -12, 30, -12, [[-6, 6], [-25, -21], [21, 25]]],
     ...[-17, 0, 17].flatMap(x0 => [[x0 - 5, 5, x0 + 5, 5, [[x0 - 1.5, x0 + 1.5]]], [x0 - 5, -5, x0 + 5, -5, [[x0 - 1.5, x0 + 1.5]]],
-      [x0 - 5, -5, x0 - 5, 5, [[-1.5, 1.5]]], [x0 + 5, -5, x0 + 5, 5, [[-1.5, 1.5]]]])],
-  floors: [[0, 0, 60, 24], [-17, 0, 10, 10], [0, 0, 10, 10], [17, 0, 10, 10]],
-  lights: [[-17, 0, 0x9fd0ff, 0], [0, 0, 0xffb070, 1], [17, 0, 0x9fd0ff, 0], [-23, -12, 0xff3a2a, 1], [23, 12, 0xff3a2a, 1]],
+      [x0 - 5, -5, x0 - 5, 5, [[-1.5, 1.5]]], [x0 + 5, -5, x0 + 5, 5, [[-1.5, 1.5]]]]),
+    ...[[1, 1], [-1, 1], [1, -1], [-1, -1]].flatMap(([sx, sz]) => { // supply sheds out in the yards, doors toward the middle
+        const [xa, xb] = sx > 0 ? [21, 28] : [-28, -21], [za, zb] = sz > 0 ? [17, 24] : [-24, -17], xi = sx > 0 ? 21 : -21, zi = sz > 0 ? 17 : -17;
+        return [[xa, zi, xb, zi, [[sx > 0 ? 23 : -26, sx > 0 ? 26 : -23]]], [xa, sz > 0 ? 24 : -24, xb, sz > 0 ? 24 : -24],
+          [xi, za, xi, zb, [[sz > 0 ? 19 : -22, sz > 0 ? 22 : -19]]], [sx > 0 ? 28 : -28, za, sx > 0 ? 28 : -28, zb]];
+      })],
+  floors: [[0, 0, 60, 24], [-17, 0, 10, 10], [0, 0, 10, 10], [17, 0, 10, 10], [24.5, 20.5, 7, 7], [-24.5, 20.5, 7, 7], [24.5, -20.5, 7, 7], [-24.5, -20.5, 7, 7]],
+  lights: [[-17, 0, 0x9fd0ff, 0], [0, 0, 0xffb070, 1], [17, 0, 0x9fd0ff, 0], [-23, -12, 0xff3a2a, 1], [23, 12, 0xff3a2a, 1],
+    [-24.5, 20.5, 0xffb070, 1], [24.5, -20.5, 0xffb070, 1]],
+  decor: [...[-17, 0, 17].flatMap(x0 => [['rack', x0 - 3.8, 3.6, 0], ['console', x0 + 3.4, -3.9, 0], ['barrels', x0 + 3.6, 3.4, 0]]),
+    ['tank', 8.5, -8.5, 0], ['tank', -8.5, 8.5, 0], ['barrels', -8.5, -8.5, 0], ['barrels', 8.5, 8.5, 0], ['pod', 25, 6, 0], ['pod', -25, -6, 0],
+    ['wreck', -8, 18, 0], ['wreck', 8, -18, 0], ['solar', 16, 26, 0], ['solar', -16, -26, 0], ['dish', -27, 8, 0], ['dish', 27, -8, 0],
+    ['debris', 10, 16, 0], ['debris', -10, -16, 0], ['debris', -20, 14, 0], ['debris', 20, -14, 0],
+    ...[[1, 1], [-1, 1], [1, -1], [-1, -1]].flatMap(([sx, sz]) => [['crates', sx * 26, sz * 22.5, 0], ['lockers', sx * 27.3, sz * 19.5, 1]])],
 };
 const BASE_MAP = STORY_MAP ? STORY_MAP.base : LAUNCH ? ARENA_BASE : null;
-const POINT_DEFS = STORY_MAP ? STORY_MAP.points : [['A', -17, 0], ['B', 0, 0], ['C', 17, 0]];
+const POINT_DEFS = (STORY_MAP ? STORY_MAP.points : [['A', -17, 0], ['B', 0, 0], ['C', 17, 0]]).map(([n, x, z]) => [n, S(x), S(z)]);
 const POINT_R = 3;
 const REGEN_DELAY = 4, REGEN_RATE = 0.1; // ducks heal 10% of max hp per second once out of combat
 const PLAYER_HP = 1.25;     // your birds are a bit tougher than the hens
@@ -401,7 +427,7 @@ const detail = {};
   const peb = new THREE.InstancedMesh(pebGeo, pebMat, MAXP);
   const d = new THREE.Object3D(), col = new THREE.Color();
   for (let i = 0; i < MAXP; i++) {
-    const r = Math.sqrt(rnd()) * 70, a = rnd() * Math.PI * 2;
+    const r = Math.sqrt(rnd()) * 70 * MS, a = rnd() * Math.PI * 2;
     d.position.set(Math.cos(a) * r, 0.02, Math.sin(a) * r);
     d.rotation.set(rnd() * 3, rnd() * 6, rnd() * 3);
     d.scale.setScalar(0.3 + Math.pow(rnd(), 4) * 2.2);
@@ -419,8 +445,8 @@ const detail = {};
   const sp = new THREE.InstancedMesh(spike, plantMat, MAXS), tp = new THREE.InstancedMesh(tip, tipMat, MAXS);
   let n = 0;
   while (n < MAXS) {
-    const r = 8 + Math.sqrt(rnd()) * 60, a = rnd() * Math.PI * 2, cx = Math.cos(a) * r, cz = Math.sin(a) * r;
-    if (Math.abs(cx) < 30 && Math.abs(cz) < 30 && rnd() < 0.6) continue; // thinner inside the battlefield
+    const r = 8 + Math.sqrt(rnd()) * 60 * MS, a = rnd() * Math.PI * 2, cx = Math.cos(a) * r, cz = Math.sin(a) * r;
+    if (Math.abs(cx) < HALF && Math.abs(cz) < HALF && rnd() < 0.6) continue; // thinner inside the battlefield
     const k = 4 + Math.floor(rnd() * 6), sc = 0.6 + rnd() * 1.2;
     for (let j = 0; j < k && n < MAXS; j++, n++) {
       d.position.set(cx + (rnd() - 0.5) * 0.5, 0, cz + (rnd() - 0.5) * 0.5);
@@ -440,7 +466,7 @@ function groundDetail(level) {
 }
 const ambient = { embers: null, drills: [], beacons: [], dropship: null, smokeT: 0 };
 const smokeSpots = [];
-const LANDMARKS = [[-46, -42, 10], [46, -44, 9], [48, 40, 11], [-50, 44, 9], [0, -56, 14], [-60, 0, 8], [60, 4, 8]];
+const LANDMARKS = [[-46, -42, 10], [46, -44, 9], [48, 40, 11], [-50, 44, 9], [0, -56, 14], [-60, 0, 8], [60, 4, 8]].map(([x, z, r]) => [S(x), S(z), r]);
 {
   const d = new THREE.Object3D();
   // boulders: scattered inside (small, as cover-looking decor) and outside (big)
@@ -502,7 +528,7 @@ const LANDMARKS = [[-46, -42, 10], [46, -44, 9], [48, 40, 11], [-50, 44, 9], [0,
   const lamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 1.2, 0.4) });
   const add = (m, x, y, z) => { m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; noRay(m); scene.add(m); return m; };
   // mining drill rigs with spinning heads and blinking lamps
-  for (const [x, z, s] of [[-46, -42, 1.2], [-50, 44, 1]]) {
+  for (const [x, z, s] of [[S(-46), S(-42), 1.2], [S(-50), S(44), 1]]) {
     for (const [lx, lz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) { const leg = add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 14 * s, 0.4), darkSteel), x + lx * s, 7 * s, z + lz * s); leg.rotation.set(lz * 0.04, 0, -lx * 0.04); }
     for (const y of [3, 7, 11]) add(new THREE.Mesh(new THREE.BoxGeometry(4.4 * s, 0.3, 4.4 * s), darkSteel), x, y * s, z);
     const head = new THREE.Group(); head.position.set(x, 4 * s, z); scene.add(head);
@@ -516,7 +542,7 @@ const LANDMARKS = [[-46, -42, 10], [46, -44, 9], [48, 40, 11], [-50, 44, 9], [0,
   }
   // refinery: tanks, pipes and a stack
   {
-    const [x, z] = [46, -44];
+    const [x, z] = [S(46), S(-44)];
     for (const [dx, dz, r, h] of [[0, 0, 3, 9], [6, 2, 2.2, 7], [-2, 6, 2, 6]]) {
       add(new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 20), steel), x + dx, h / 2, z + dz);
       add(new THREE.Mesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), steel), x + dx, h, z + dz);
@@ -529,7 +555,7 @@ const LANDMARKS = [[-46, -42, 10], [46, -44, 9], [48, 40, 11], [-50, 44, 9], [0,
   }
   // habitat domes with lit windows
   {
-    const [x, z] = [48, 40];
+    const [x, z] = [S(48), S(40)];
     const glass = new THREE.MeshStandardMaterial({ color: 0x9fc8ff, roughness: 0.05, metalness: 0.9, transparent: true, opacity: 0.55 });
     for (const [dx, dz, r] of [[0, 0, 5], [8, 4, 3.4], [-6, 6, 3]]) {
       add(new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1.6, 24), steel), x + dx, 0.8, z + dz);
@@ -542,7 +568,7 @@ const LANDMARKS = [[-46, -42, 10], [46, -44, 9], [48, 40, 11], [-50, 44, 9], [0,
   }
   // a crashed freighter half buried in the dust
   {
-    const [x, z] = [0, -58];
+    const [x, z] = [0, S(-58)];
     const hull = add(new THREE.Mesh(new THREE.CylinderGeometry(4, 5.5, 26, 10, 1), steel), x, 2, z);
     hull.rotation.set(0.15, 0.3, Math.PI / 2 - 0.25);
     const nose = add(new THREE.Mesh(new THREE.ConeGeometry(4, 7, 10), steel), x + 14, 4.5, z - 4); nose.rotation.set(0, 0.3, -Math.PI / 2 - 0.25);
@@ -552,10 +578,10 @@ const LANDMARKS = [[-46, -42, 10], [46, -44, 9], [48, 40, 11], [-50, 44, 9], [0,
   }
   // perimeter: light pylons and a low wall around the play area
   const wallMat = toon({ color: 0x55504a, roughness: 0.85, metalness: 0.1, normalMap: plateTex.nrm });
-  for (const [x, z, w, dd] of [[0, -30.6, 61, 0.4], [0, 30.6, 61, 0.4], [-30.6, 0, 0.4, 61], [30.6, 0, 0.4, 61]]) add(new THREE.Mesh(new THREE.BoxGeometry(w, 0.6, dd), wallMat), x, 0.3, z);
+  for (const [x, z, w, dd] of [[0, -HALF - 0.6, HALF * 2 + 1, 0.4], [0, HALF + 0.6, HALF * 2 + 1, 0.4], [-HALF - 0.6, 0, 0.4, HALF * 2 + 1], [HALF + 0.6, 0, 0.4, HALF * 2 + 1]]) add(new THREE.Mesh(new THREE.BoxGeometry(w, 0.6, dd), wallMat), x, 0.3, z);
   for (let i = 0; i <= 8; i++) for (const s of [-1, 1]) {
-    const t = -30 + i * 7.5;
-    for (const [px, pz] of [[s * 30.6, t], [t, s * 30.6]]) {
+    const t = -HALF + i * HALF / 4;
+    for (const [px, pz] of [[s * (HALF + 0.6), t], [t, s * (HALF + 0.6)]]) {
       add(new THREE.Mesh(new THREE.BoxGeometry(0.25, 2.2, 0.25), darkSteel), px, 1.1, pz);
       const l = noRay(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.3), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 1.6, 2.4) }))); l.position.set(px, 2.25, pz); scene.add(l);
     }
@@ -625,7 +651,8 @@ const hayMat = toon({ map: plateTex.col, normalMap: plateTex.nrm, roughness: 0.5
 const hayTopMat = toon({ color: 0x555a62, roughness: 0.6, metalness: 0.6 });
 const plankMat = toon({ color: 0x8c8a86, roughness: 0.9, metalness: 0.05, normalMap: rockTex.nrm }); // concrete
 const barnRedMat = toon({ map: plateTex.col, normalMap: plateTex.nrm, roughness: 0.55, metalness: 0.6, color: 0xb8bcc4 });
-OBSTACLE_DEFS.forEach(([x, z, w, d, h], idx) => {
+OBSTACLE_DEFS.forEach(([x0, z0, w, d, h], idx) => {
+  const x = S(x0), z = S(z0);
   const barrier = Math.min(w, d) <= 1;          // thin ones are concrete barriers
   const hut = w === 3 && d === 3;              // square ones are prefab huts
   let m;
@@ -695,7 +722,8 @@ if (BASE_MAP) {
       (h, x, y) => { const g = 92 + (n(x, y, 4) - 0.5) * 40 + h * 30; const dirt = Math.max(0, n2(x, y, 3) - 0.55) * 2.2; return mixc([g * 0.95, g, g * 1.08], [70, 52, 40], Math.min(0.85, dirt)); },
       3, 1, 1);
   })();
-  for (const [x, z, w, d] of BASE_MAP.floors) {
+  for (const [x0, z0, w0, d0] of BASE_MAP.floors) {
+    const x = S(x0), z = S(z0), w = S(w0), d = S(d0);
     const c = deckTex.col.clone(), nm = deckTex.nrm.clone(); c.needsUpdate = nm.needsUpdate = true;
     c.repeat.set(w / 4, d / 4); nm.repeat.set(w / 4, d / 4);
     const f = noRay(new THREE.Mesh(new THREE.PlaneGeometry(w, d), toon({ map: c, normalMap: nm, roughness: 0.55, metalness: 0.55, color: w > 30 ? 0x9a9a9a : 0xb4bcc8 })));
@@ -738,7 +766,7 @@ if (BASE_MAP) {
     const h = noRay(new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.35, 0.74), hazardMat)); h.position.set(x, 0.5, z); scene.add(h);
     const l = noRay(new THREE.Mesh(new THREE.BoxGeometry(ew ? 0.2 : 0.74, 0.08, ew ? 0.74 : 0.2), stripBad)); l.position.set(x, WALL_H - 0.3, z); scene.add(l);
   };
-  for (const [x1, z1, x2, z2, gaps = []] of BASE_MAP.walls) {
+  for (const [x1, z1, x2, z2, gaps = []] of BASE_MAP.walls.map(([a, b, c, d, g]) => [S(a), S(b), S(c), S(d), (g || []).map(([p, q]) => [S(p), S(q)])])) {
     const ew = z1 === z2, a0 = ew ? Math.min(x1, x2) : Math.min(z1, z2), a1 = ew ? Math.max(x1, x2) : Math.max(z1, z2);
     let a = a0;
     for (const [g0, g1] of gaps.slice().sort((p, q) => p[0] - q[0])) {
@@ -748,7 +776,8 @@ if (BASE_MAP) {
     if (ew) wallBox(a, z1, a1, z1); else wallBox(x1, a, x1, a1);
   }
   // failing ceiling lamps: a hanging fixture plus a real light, some of them flickering
-  for (const [x, z, color, flicker] of BASE_MAP.lights) {
+  for (const [x0, z0, color, flicker] of BASE_MAP.lights) {
+    const x = S(x0), z = S(z0);
     const L = new THREE.PointLight(color, 9, 13, 1.6); L.position.set(x, 2.6, z); scene.add(L);
     const bulb = noRay(new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.25), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.2) })));
     bulb.position.set(x, 2.75, z); scene.add(bulb);
@@ -756,6 +785,73 @@ if (BASE_MAP) {
   }
   // dusk over a dead colony: a lower, redder sun so the lamps and strips carry the scene
   sun.intensity = 2.3; sun.color.setHex(0xffb184); hemi.intensity = 0.4;
+}
+// ---------------------------------------------------------------- base clutter: consoles, lockers, cryo pods, tanks, a crashed dropship...
+// [kind, x, z, turned] in layout units; every piece keeps its real size so the bigger map gets more stuff, not bigger stuff
+const DECOR_SIZE = { // footprint w x d and height of the blocking box (0 = walk-through)
+  console: [1.6, 0.8, 1.2], lockers: [2.4, 0.6, 2.2], rack: [1.8, 0.9, 2.2], barrels: [1.7, 1.7, 1.1], tank: [2.4, 2.4, 3.2],
+  dish: [1.4, 1.4, 1.0], pod: [1.0, 2.3, 1.0], wreck: [7, 3, 2.4], solar: [3.2, 1.7, 1.2], crates: [2.2, 1.6, 1.4], debris: [1.6, 1.2, 0],
+};
+if (BASE_MAP && BASE_MAP.decor) {
+  const metal = toon({ map: plateTex.col, normalMap: plateTex.nrm, roughness: 0.5, metalness: 0.7, color: 0x8a9098 });
+  const dark = toon({ color: 0x2a2e35, roughness: 0.45, metalness: 0.75 });
+  const rusty = toon({ map: containerTex.col, normalMap: containerTex.nrm, color: 0x9a5a3a, roughness: 0.7, metalness: 0.4 });
+  const yellow = toon({ map: stripeTex, roughness: 0.6, metalness: 0.2 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x9fe8ff, roughness: 0.05, metalness: 0.6, transparent: true, opacity: 0.45 });
+  const panel = toon({ color: 0x1c2a4a, roughness: 0.2, metalness: 0.8 });
+  const scr = [new THREE.Color(0.3, 1.6, 1.2), new THREE.Color(2.2, 0.4, 0.2), new THREE.Color(1.8, 1.4, 0.4)].map(c => new THREE.MeshBasicMaterial({ color: c }));
+  const crate = toon({ map: plateTex.col, normalMap: plateTex.nrm, roughness: 0.6, metalness: 0.5, color: 0x6a7a52 });
+  BASE_MAP.decor.forEach(([kind, x0, z0, turned], k) => {
+    const x = S(x0), z = S(z0), [w0, d0, h] = DECOR_SIZE[kind], [w, d] = turned ? [d0, w0] : [w0, d0];
+    const g = new THREE.Group(); g.position.set(x, 0, z); if (turned) g.rotation.y = Math.PI / 2;
+    const sh = [], part = (geo, mat, px, py, pz, shoot = true) => { const m = new THREE.Mesh(geo, mat); m.position.set(px, py, pz); m.castShadow = m.receiveShadow = true; if (shoot && h > 0) sh.push(m); else noRay(m); g.add(m); return m; };
+    const B = (a, b, c) => new THREE.BoxGeometry(a, b, c), C = (r, hh, n = 14) => new THREE.CylinderGeometry(r, r, hh, n);
+    if (kind === 'console') { // a terminal with a glowing screen, some still showing an alarm
+      part(B(1.6, 0.9, 0.8), dark, 0, 0.45, 0);
+      const top = part(B(1.6, 0.06, 0.7), panel, 0, 0.95, 0.05); top.rotation.x = -0.5;
+      part(B(1.3, 0.5, 0.06), scr[k % 3], 0, 1.2, -0.3, false);
+      part(B(1.4, 0.6, 0.08), dark, 0, 1.2, -0.36);
+    } else if (kind === 'lockers') {
+      for (let i = 0; i < 4; i++) { const l = part(B(0.58, 2.1, 0.56), i % 3 === 1 ? rusty : metal, -0.9 + i * 0.6, 1.05, 0); if (i === 2) { l.rotation.z = 0.05; } }
+      part(B(2.4, 0.04, 0.04), scr[0], 0, 1.7, 0.29, false);
+    } else if (kind === 'rack') { // server rack with blinking lights
+      part(B(1.8, 2.2, 0.9), dark, 0, 1.1, 0);
+      for (let i = 0; i < 6; i++) part(B(1.5, 0.05, 0.02), scr[(i + k) % 3], 0, 0.4 + i * 0.3, 0.46, false);
+    } else if (kind === 'barrels') {
+      for (const [bx, bz, mat] of [[-0.4, -0.35, rusty], [0.45, -0.3, yellow], [0, 0.45, metal]]) { part(C(0.38, 1.1), mat, bx, 0.55, bz); part(C(0.4, 0.06), dark, bx, 0.75, bz, false); }
+    } else if (kind === 'tank') { // a fuel tank in a cradle
+      part(C(1.1, 3, 18), metal, 0, 1.7, 0); part(new THREE.SphereGeometry(1.1, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2), metal, 0, 3.2, 0, false);
+      part(C(1.14, 0.4, 18), yellow, 0, 0.9, 0, false);
+      for (const [lx, lz] of [[-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) part(B(0.15, 0.6, 0.15), dark, lx, 0.3, lz, false);
+    } else if (kind === 'dish') { // a toppled comms dish
+      part(B(1.2, 0.5, 1.2), dark, 0, 0.25, 0); part(C(0.12, 1.4, 8), metal, 0, 1, 0, false);
+      const dsh = part(new THREE.SphereGeometry(1.6, 18, 8, 0, Math.PI * 2, 0, 0.9), metal, 0.3, 1.9, 0, false); dsh.rotation.set(0.2, 0, 2.2); dsh.material = metal;
+    } else if (kind === 'pod') { // a cryo pod, the glass cracked
+      part(B(1.0, 0.55, 2.3), metal, 0, 0.28, 0);
+      const lid = part(C(0.45, 2.1, 12), glass, 0, 0.6, 0, false); lid.rotation.x = Math.PI / 2; lid.scale.set(1, 1, 0.55);
+      part(B(0.5, 0.05, 0.3), scr[1], 0, 0.58, 1.05, false);
+    } else if (kind === 'wreck') { // a crashed dropship, nose in the dirt
+      const hull = part(B(6.4, 2, 2.6), metal, 0, 1.1, 0); hull.rotation.z = 0.08;
+      part(B(2, 1.4, 2.2), dark, 3.6, 0.7, 0).rotation.z = -0.35;
+      const wing = part(B(2.2, 0.2, 6), rusty, -0.8, 1.6, 0, false); wing.rotation.x = 0.12;
+      part(B(0.3, 1.6, 1.2), dark, -2.8, 2.6, 0, false);
+      part(B(0.9, 0.5, 2.62), glass, 2.4, 1.6, 0, false);
+      smokeSpots.push(new THREE.Vector3(x, 2.2, z));
+    } else if (kind === 'solar') { // tilted solar panels on legs
+      for (const sx of [-0.8, 0.8]) { const p = part(B(1.5, 0.06, 1.6), panel, sx, 1.0, 0, false); p.rotation.x = -0.45; }
+      part(B(3.2, 0.7, 0.2), dark, 0, 0.35, 0.4); part(B(3.2, 0.12, 0.12), metal, 0, 0.9, -0.3, false);
+    } else if (kind === 'crates') {
+      part(B(1.1, 1.1, 1.1), crate, -0.5, 0.55, -0.2); part(B(1, 0.9, 1), crate, 0.6, 0.45, 0.25).rotation.y = 0.3; part(B(0.9, 0.8, 0.9), metal, -0.4, 1.5, -0.2).rotation.y = -0.4;
+    } else if (kind === 'debris') { // fallen panels and a bent beam you can step over
+      for (let i = 0; i < 4; i++) { const r = part(B(0.9 - i * 0.12, 0.08, 0.6), i % 2 ? metal : rusty, (i - 1.5) * 0.4, 0.05 + i * 0.03, Math.sin(i * 2) * 0.3, false); r.rotation.set(0.15 * i, i, 0.1); }
+      const beam = part(B(1.8, 0.16, 0.16), dark, 0, 0.18, 0.4, false); beam.rotation.set(0, 0.4, 0.15);
+    }
+    scene.add(g);
+    if (h > 0) {
+      g.updateMatrixWorld(true); staticShootables.push(...sh);
+      boxes.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h });
+    }
+  });
 }
 function baseTick(dt) {
   if (!BASE_MAP) return;
@@ -1895,8 +1991,8 @@ const keys = new Set();
 let isTouch = false;
 
 function setupWorld() {
-  playerBase = makeBase(PLAYER, 0, 25);
-  enemyBase = makeBase(ENEMY, 0, -25);
+  playerBase = makeBase(PLAYER, 0, S(25));
+  enemyBase = makeBase(ENEMY, 0, S(-25));
   rebuildGrid();
   const start = [['trooper', -3, 17], ['trooper', 3, 17], ['trooper', -1, 17], ['trooper', 1, 17], ['heavy', -2, 19], ['sniper', 2, 19]];
   for (const [t, x, z] of start) makeUnit(PLAYER, t, x, z);
@@ -2283,6 +2379,7 @@ function standSpot(x, z, gap = 1.3) {
   }
   const [i, j] = nearestFree(toCell(x), toCell(z)); return [cellCenter(i), cellCenter(j)];
 }
+const standSpotAny = (x, z) => standSpot(x, z, 1.0);
 function spawnPlayer(type) {
   const u = spawnPlayerAt(type);
   if (u && camp.m && !u.callsign) { // reinforcements get a name too
@@ -2301,8 +2398,8 @@ function spawnPlayerAt(type) {
     if (turn.on) { u.ap = 2; u.gren = type === 'trooper' ? 1 : 0; }
     return u;
   }
-  const u = makeUnit(PLAYER, type, (Math.random() - 0.5) * 3, 21.5);
-  if (tac.on || turn.on) { [u.x, u.z] = standSpot((Math.random() - 0.5) * 6, 19 + Math.random()); if (turn.on) { u.ap = 2; u.gren = type === 'trooper' ? 1 : 0; } return u; } // ready to be ordered
+  const u = makeUnit(PLAYER, type, (Math.random() - 0.5) * 3, S(21.5));
+  if (tac.on || turn.on) { [u.x, u.z] = standSpot((Math.random() - 0.5) * 6, S(19) + Math.random()); if (turn.on) { u.ap = 2; u.gren = type === 'trooper' ? 1 : 0; } return u; } // ready to be ordered
   commandMove([u], (Math.random() - 0.5) * 8, 17 - Math.random() * 2, 'move', true);
   return u;
 }
@@ -4758,17 +4855,17 @@ function tbReinforce() {
   const rule = m.tb || {};
   const alive = tbFoes().length;
   if (rule.tyrantAt && turn.n === rule.tyrantAt && !entities.some(e => e.elite && !e.dead)) {
-    const t = makeUnit(ENEMY, 'elite', 0, -20); t.alert = true; smoke(0, 0.5, -20, 3, 8);
+    const t = makeUnit(ENEMY, 'elite', 0, S(-20)); t.alert = true; smoke(0, 0.5, S(-20), 3, 8);
     radio('The Hive Tyrant is out of the hive!', 'warn'); twistBanner('THE TYRANT');
   }
   if (rule.tyrantEvery && turn.n % rule.tyrantEvery === 0 && !entities.some(e => e.elite && !e.dead)) {
-    const t = makeUnit(ENEMY, 'elite', 0, -20); t.alert = true; radio('The Hive Tyrant joins the fight', 'warn');
+    const t = makeUnit(ENEMY, 'elite', 0, S(-20)); t.alert = true; radio('The Hive Tyrant joins the fight', 'warn');
   }
   if (!(turn.n % (rule.every || 1) === 0)) return;
   const n = Math.min((rule.spawn || 2) + (turn.n >= 5 ? 1 : 0), 12 - alive);
   for (let i = 0; i < n; i++) {
     const type = i === 0 && turn.n >= 3 ? (turn.n % 2 ? 'burrower' : 'shielder') : i % 4 === 3 ? 'sniper' : i % 3 === 2 ? 'heavy' : 'trooper';
-    const x = (Math.random() - 0.5) * 16, z = -20 - Math.random() * 2;
+    const x = S((Math.random() - 0.5) * 16), z = S(-20 - Math.random() * 2);
     const h = makeUnit(ENEMY, type, x, z); h.alert = true;
     smoke(x, 0.4, z, 1.4, 4);
   }
@@ -5269,7 +5366,7 @@ function launchMission(i, pick, checkpoint = 0) {
   // swap the default squad for the marines you picked
   for (const e of entities) if (e.team === PLAYER && !e.isBase && !e.isTower) { e.dead = true; scene.remove(e.mesh); }
   entities = entities.filter(e => !e.dead);
-  let spots = [[-4.5, 17], [4.5, 17], [-1.5, 17], [1.5, 17], [-3, 19.5], [3, 19.5], [0, 19.5], [-6, 19.5]]; // roomy: marines are drawn big in turns
+  let spots = [[-4.5, 17], [4.5, 17], [-1.5, 17], [1.5, 17], [-3, 19.5], [3, 19.5], [0, 19.5], [-6, 19.5]].map(([x, z]) => [x, S(z)]); // roomy: marines are drawn big in turns
   if (m.story) { // the swarm here is scripted: clear the default aliens and start at the checkpoint
     for (const e of entities) if (e.team === ENEMY && !e.isBase) { e.dead = true; scene.remove(e.mesh); }
     entities = entities.filter(e => !e.dead);
@@ -5290,7 +5387,7 @@ function launchMission(i, pick, checkpoint = 0) {
     for (const e of entities) if (e.team === ENEMY && !e.isBase) { e.dead = true; scene.remove(e.mesh); }
     entities = entities.filter(e => !e.dead);
     const extra = { hunt: [['burrower', 0, -10]], blackout: [['shielder', 0, -16]], hivefall: [['eggsac', -6, -16], ['eggsac', 6, -16], ['shielder', 0, -17]] }[m.id] || [];
-    for (const [t, x, z] of [['trooper', -14, -15], ['trooper', 14, -15], ['trooper', -4, -13], ['trooper', 4, -13], ['heavy', -9, -18], ['heavy', 9, -18], ['sniper', -2, -20], ['sniper', 2, -20], ...extra]) makeUnit(ENEMY, t, x, z).alert = true;
+    for (const [t, x, z] of [['trooper', -14, -15], ['trooper', 14, -15], ['trooper', -4, -13], ['trooper', 4, -13], ['heavy', -9, -18], ['heavy', 9, -18], ['sniper', -2, -20], ['sniper', 2, -20], ...extra]) makeUnit(ENEMY, t, ...standSpotAny(S(x), S(z))).alert = true;
   }
   game.cp = m.ore;
   startTurns();
@@ -5429,13 +5526,17 @@ const STORIES = {
         twistBanner('IT WAS A TRAP');
         const ring = [[15, -14], [16, -19], [10, -21], [-6, -21], [-11, -18], [-11, -12], [-5, -11], [9, -11], [13, -11], [19, -11], [4, -21]]
           .map(([x, z], k) => [k === 1 || k === 6 ? 'burrower' : k === 8 ? 'shielder' : k % 4 === 3 ? 'sniper' : k % 5 === 2 ? 'heavy' : 'trooper', x, z]);
-        setTimeout(() => { for (const [, x, z] of ring) smoke(x, 0.5, z, 2, 6); foes(ring, 'hunt'); }, 1800);
+        setTimeout(() => { for (const [, x, z] of ring) smoke(S(x), 0.5, S(z), 2, 6); foes(ring, 'hunt'); }, 1800);
         const tyrant = () => { if (!camp.done) { say([['Command', 'Something big is coming out of the hive. Hold on!']]); foes([['elite', 0, -24]], 'hunt'); } };
         if (turn.on) story.later.push([2, tyrant]); else setTimeout(tyrant, 22000);
       } },
   ],
 };
 const story = { def: null, step: -1, t: 0, checkpoint: 0, beam: null, queue: [], sayT: 0 };
+for (const k in STORIES) for (const st of STORIES[k]) { // stretch the scripted positions to the map size
+  if (st.cp) st.cp = st.cp.map(S);
+  if (st.at) { st.at = st.at.map(S); st.r *= MS; if (st.clear) st.clear *= MS; }
+}
 function storyStart(checkpoint) {
   document.body.classList.add('story');
   story.def = STORIES[camp.m.story]; story.checkpoint = checkpoint;
@@ -5493,8 +5594,8 @@ function say(lines, gap = 2.6) {
 }
 function foes(list, how) {
   const out = [];
-  for (const [t, x, z] of list) {
-    const u = makeUnit(ENEMY, t, x, z);
+  for (const [t, x0, z0] of list) {
+    const u = makeUnit(ENEMY, t, ...standSpotAny(S(x0), S(z0)));
     if (turn.on) { if (how === 'hunt') u.alert = true; }
     else if (how === 'hunt') { const tgt = possessed || playerUnits()[0]; if (tgt) commandMove([u], tgt.x, tgt.z, 'amove', true); }
     out.push(u);
