@@ -26,6 +26,10 @@ const TYPES = {
   mortar: { hp: 180, speed: 0, range: 18, dmg: 45, rate: 3.2, radius: 0.8, acc: 1 },
   scarecrow: { hp: 300, speed: 0, range: 6, dmg: 0, rate: 1, radius: 0.6, acc: 0 },
   elite: { hp: 450, speed: 4.0, range: 11, dmg: 12, rate: 0.4, radius: 0.75, acc: 0.8, ability: '', abilityCd: 0 },
+  // campaign-only aliens: each breaks one rule
+  burrower: { hp: 70, speed: 5, range: 2, dmg: 20, rate: 1, radius: 0.5, acc: 0.85 },  // tunnels under walls, ambushes up close
+  shielder: { hp: 120, speed: 3.2, range: 9, dmg: 6, rate: 1, radius: 0.6, acc: 0.6 },  // shields the aliens around it
+  eggsac: { hp: 90, speed: 0, range: 0, dmg: 0, rate: 9, radius: 0.7, acc: 0 },          // hatches a skitter every turn
 };
 const COSTS = { trooper: 20, heavy: 35, sniper: 30, turret: 40, mortar: 55, scarecrow: 25 };
 const TOWERS = ['turret', 'mortar', 'scarecrow'];
@@ -679,12 +683,13 @@ const eyeGlow = [0x9cff3a, 0xff3a6a].map(c => new THREE.MeshBasicMaterial({ colo
 const acidMat = new THREE.MeshStandardMaterial({ color: 0x6aff2a, emissive: 0x4adf10, emissiveIntensity: 1.4, roughness: 0.2, transparent: true, opacity: 0.85 });
 const NAMES = [
   { trooper: 'Marine', heavy: 'Juggernaut', sniper: 'Ranger', turret: 'Autoturret', mortar: 'Mortar', scarecrow: 'Stasis pylon' },
-  { trooper: 'Skitter', heavy: 'Brute', sniper: 'Spitter', elite: 'Hive Tyrant' },
+  { trooper: 'Skitter', heavy: 'Brute', sniper: 'Spitter', elite: 'Hive Tyrant', burrower: 'Burrower', shielder: 'Warden', eggsac: 'Egg sac' },
 ];
 const nameOf = u => NAMES[u.team][u.type];
 const sphere = new THREE.SphereGeometry(1, 16, 12);
 const ARMOR = { trooper: 0x6d7a68, heavy: 0x4a4f58, sniper: 0xa89478 };   // olive, steel, desert
-const CARAPACE = { trooper: 0x3a2448, heavy: 0x2a1a30, sniper: 0x3c2a1c };
+const CARAPACE = { trooper: 0x3a2448, heavy: 0x2a1a30, sniper: 0x3c2a1c, burrower: 0x5a3a22, shielder: 0x1c2c4a, eggsac: 0x5a2a40 };
+const ALIEN_MODEL = { burrower: 'trooper', shielder: 'heavy' };
 
 function tagMeshes(group, ent) {
   group.traverse(o => { o.userData.entity = ent; if (o.isMesh) o.castShadow = true; });
@@ -740,9 +745,22 @@ function buildMarine(u, g, type, team) {
   if (type === 'heavy') g.scale.setScalar(1.08);
 }
 
+function buildEggSac(u, g) { // a pulsing, veined sac on a root bed
+  const shell = toon({ color: CARAPACE.eggsac, roughness: 0.25, metalness: 0.1, emissive: 0x401030, emissiveIntensity: 0.4 });
+  u.bodyMat = shell;
+  const up = new THREE.Group(); g.add(up); u.upper = up;
+  up.add(blob(shell, 0.6, 0.75, 0.6, 0, 0.7, 0));
+  for (let k = 0; k < 5; k++) { const a = k / 5 * Math.PI * 2; up.add(blob(shell, 0.28, 0.3, 0.28, Math.cos(a) * 0.5, 0.3, Math.sin(a) * 0.5)); }
+  const core = blob(acidMat, 0.3, 0.38, 0.3, 0, 0.8, 0); up.add(core); u.pulse = core;
+  u.legs = [new THREE.Group(), new THREE.Group()]; g.add(u.legs[0], u.legs[1]); u.feet = u.legs; u.wings = [new THREE.Group(), new THREE.Group()];
+  u.eyes = []; u.muzzleOffset = { side: 0, fwd: 0, y: 0.8 };
+}
 function buildAlien(u, g, type) {
+  const kind = type;
+  if (type === 'eggsac') { buildEggSac(u, g); return; }
+  type = ALIEN_MODEL[type] || type;
   const elite = type === 'elite';
-  const shell = elite ? goldMat.clone() : toon({ color: CARAPACE[type], roughness: 0.28, metalness: 0.35, normalMap: rockTex.nrm, normalScale: new THREE.Vector2(0.6, 0.6) });
+  const shell = elite ? goldMat.clone() : toon({ color: CARAPACE[kind], roughness: 0.28, metalness: 0.35, normalMap: rockTex.nrm, normalScale: new THREE.Vector2(0.6, 0.6) });
   u.bodyMat = shell;
   const belly = toon({ color: type === 'sniper' ? 0x8a6a3a : 0x6a4a5a, roughness: 0.6, metalness: 0.05 });
   const legMat = toon({ color: 0x1a1018, roughness: 0.4, metalness: 0.3 });
@@ -787,6 +805,11 @@ function buildAlien(u, g, type) {
   });
   u.legs = sides; u.feet = sides; u.wings = [new THREE.Group(), new THREE.Group()];
   u.muzzleOffset = { side: 0, fwd: -hz + 0.1, y: hy };
+  if (kind === 'shielder') { // a warden: a glowing halo on its back
+    const halo = noRay(new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.05, 8, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 1.4, 2.6) })));
+    halo.position.set(0, L + 0.9, 0.3); halo.rotation.x = 0.4; up.add(halo);
+  }
+  if (kind === 'burrower') for (const sd of [-1, 1]) { const claw = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.45, 5), toon({ color: 0xd8c8b0, roughness: 0.4 })); claw.position.set(sd * 0.18, L, -0.7); claw.rotation.set(-1.3, 0, sd * 0.4); up.add(claw); }
   if (elite) { // the tyrant: a crown of glowing spikes
     for (let k = 0; k < 5; k++) { const sp = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.55, 5), acidMat); sp.position.set((k - 2) * 0.16, L + 0.6, -0.25 + Math.abs(k - 2) * 0.08); up.add(sp); }
   }
@@ -1697,6 +1720,7 @@ function damage(t, amount, src) {
     return;
   }
   if (t.armorT > 0) amount *= 0.5;
+  if (t.shieldHP > 0) { const a = Math.min(t.shieldHP, amount); t.shieldHP -= a; amount -= a; if (t.bubble) t.bubble.visible = t.shieldHP > 0; if (amount <= 0) { burst(t.x, 1, t.z, 0.6, 0x7fc8ff); return; } }
   t.hp -= amount;
   t.hurtAt = game.time;
   t.flash = 0.12;
@@ -2686,7 +2710,7 @@ function pickEntity(sx, sy) {
   let best = null, bd = Infinity;
   const tol = isTouch ? 38 : 26;
   for (const e of entities) {
-    if (e.dead) continue;
+    if (e.dead || hiddenFoe(e)) continue;
     const s = toScreen(e.x, e.isBase ? 1.6 : 0.8, e.z);
     if (s.behind) continue;
     const d = Math.hypot(s.x - sx, s.y - sy) - (e.isBase ? 45 : 0);
@@ -3456,7 +3480,7 @@ function drawOverlay() {
     }
   }
   for (const e of entities) {
-    if (e.dead || e.possessed) continue;
+    if (e.dead || e.possessed || hiddenFoe(e)) continue;
     const selected = selection.includes(e);
     if (!(selected || e.hp < e.maxHp || e.isBase || e.elite || e.stunT > 0 || e.lvl > 1)) continue;
     const s = toScreen(e.x, e.isBase ? 5.8 : e.elite ? 2.8 : 2.0, e.z);
@@ -3536,7 +3560,7 @@ function drawMinimap() {
   if (mk) { mctx.fillStyle = '#5fd0ff'; mctx.save(); mctx.translate(X(mk.x), X(mk.z)); mctx.rotate(Math.PI / 4); mctx.fillRect(-4, -4, 8, 8); mctx.restore(); }
   mctx.lineWidth = 1;
   for (const e of entities) {
-    if (e.dead) continue;
+    if (e.dead || hiddenFoe(e)) continue;
     mctx.fillStyle = e.elite ? '#ffc340' : e.team === PLAYER ? (selection.includes(e) ? '#9dffc4' : '#3fa9ff') : '#ff5a3c';
     if (e.isBase) {
       mctx.fillRect(X(e.x) - 6, X(e.z) - 6, 12, 12);
@@ -3628,6 +3652,7 @@ function animateBird(e, dt, now) {
     if (alien) up.rotation.x = 0.12 - kick; else up.rotation.x = -0.04;
   } else if (e.gun) e.gun.position.z += (-0.3 - e.gun.position.z) * 0.3;
   if (e.sac) e.sac.scale.setScalar(0.3 + Math.sin(now / 200 + e.animT) * 0.03);
+  if (e.pulse) e.pulse.scale.setScalar(0.32 + Math.sin(now / 260 + e.animT) * 0.06);
   if (e.eyes && alien) { const b = 1.5 + Math.sin(now / 300 + e.animT) * 0.5; for (const ey of e.eyes) ey.scale.z = 0.03 * b; }
 }
 
@@ -3657,19 +3682,69 @@ function simulate(simDt, dt) {
 // and easier to crit. Then every alien that has spotted you acts, and overwatch fires at anything that moves in range.
 const TBS = {
   trooper: { move: 8, dmg: [22, 30] }, heavy: { move: 6.5, dmg: [34, 46] }, sniper: { move: 7, dmg: [44, 58] }, elite: { move: 9, dmg: [30, 42] },
+  burrower: { move: 11, dmg: [38, 50] }, shielder: { move: 6, dmg: [16, 22] }, eggsac: { move: 0, dmg: [0, 0] },
 };
+// perks: at each promotion a marine picks one of two (on the sector map). Effects are read straight off u.perks.
+const PERKS = {
+  sprint: { name: 'Sprinter', text: '+3 move' },
+  grenade: { name: 'Grenadier', text: '+1 frag grenade' },
+  shred: { name: 'Shredder', text: '+15% crit chance' },
+  hunter: { name: 'Flanker', text: '+15 aim against flanked aliens' },
+  rapid: { name: 'Double tap', text: 'Shooting as your first action leaves 1 action' },
+  reflex: { name: 'Lightning reflexes', text: 'Overwatch shots at you get −25 aim' },
+  iron: { name: 'Iron skin', text: 'Takes 25% less damage' },
+  breach: { name: 'Breacher', text: '+20 aim within 6m' },
+  squad: { name: 'Squadsight', text: 'Shoot any alien in sight, any range (−10 aim past range)' },
+  deadeye: { name: 'Deadeye', text: '+10 aim' },
+};
+const PERK_TREE = {
+  trooper: [['sprint', 'grenade'], ['shred', 'hunter'], ['rapid', 'reflex']],
+  heavy: [['iron', 'breach'], ['sprint', 'hunter'], ['shred', 'reflex']],
+  sniper: [['squad', 'deadeye'], ['rapid', 'hunter'], ['shred', 'reflex']],
+};
+const hasPerk = (u, k) => !!(u.perks && u.perks.includes(k));
+const moveR = u => (TBS[u.type] || TBS.trooper).move + (hasPerk(u, 'sprint') ? 3 : 0);
+// class abilities in turns
+const ABIL = { trooper: { name: 'Grenade' }, heavy: { name: 'Shield wall', cd: 3 }, sniper: { name: 'Aimed shot', cd: 2 } };
+const FOCUS_MAX = 4, LIVE_COST = 2;
 const TB_ALIEN_DMG = 0.62, TB_BASE_DMG = 3; // aliens hit a bit softer; the hive takes triple damage so it can be burned in a few turns
-const turn = { live: false, liveT: 0, liveUsed: false, on: false, side: 'player', n: 1, sel: null, busy: false, tool: 'move', pending: null, hover: null, hoverKey: '', cam: null, focusT: 0, focus: new THREE.Vector3(), spawnT: 0 };
+const turn = { fp: 2, fast: false, tut: -1, live: false, liveT: 0, liveUsed: false, on: false, side: 'player', n: 1, sel: null, busy: false, tool: 'move', pending: null, hover: null, hoverKey: '', cam: null, focusT: 0, focus: new THREE.Vector3(), spawnT: 0 };
 const tbSurvive = st => Math.ceil(st.survive / 12);
-const wait = ms => new Promise(r => setTimeout(r, ms * (window.__tbFast || 1)));
+const wait = ms => new Promise(r => setTimeout(r, ms * (window.__tbFast || 1) * (turn.fast && turn.side === 'enemy' ? 0.35 : 1)));
+try { turn.fast = localStorage.getItem('hivefall.fast') === '1'; } catch (e) { /* default off */ }
+// fog of war: an alien is seen while a marine has it in sight (or it just revealed itself by attacking)
+const sightR = () => (camp.m && camp.m.fog ? 11 : 16);
+function hiddenFoe(e) { return turn.on && !turn.live && e.team === ENEMY && !e.isBase && !e.seen; }
+function tbVision() {
+  const mine = tbMine(), R = sightR();
+  for (const h of tbFoes()) h.seen = !h.burrowed && ((h.revealN || 0) >= turn.n || mine.some(u => Math.hypot(u.x - h.x, u.z - h.z) < R && tbLOS(u, h)));
+}
+// soldier barks on the radio
+const BARKS = {
+  kill: ['Target down!', 'Got it!', 'Scratch one!', 'That one\'s done.', 'Stay down!'],
+  crit: ['Right in the eye!', 'Clean hit!', 'Did you see that?'],
+  miss: ['Missed!', 'Damn, it moved!', 'Can\'t get a bead!'],
+  hurt: ['I\'m hit!', 'Argh, it got me!', 'Taking fire!'],
+  down: ['Man down!', 'We lost one!', 'No! Not like this!'],
+  contact: ['Contacts!', 'Movement ahead!', 'They\'re here!'],
+  ow: ['Overwatch, firing!', 'Got movement, engaging!'],
+  live: ['Going in!', 'I\'ve got this.', 'Cover me!'],
+};
+function bark(u, kind) {
+  if (!u || Math.random() < 0.25) return;
+  const lines = BARKS[kind], line = lines[Math.floor(Math.random() * lines.length)];
+  radio(`${u.callsign || nameOf(u)}: "${line}"`, kind === 'hurt' || kind === 'down' ? 'warn' : 'good', { key: 'bark', gap: 1.5 });
+}
 const tbMine = () => entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower);
 const tbFoes = () => entities.filter(e => !e.dead && e.team === ENEMY && !e.isBase);
 
 function startTurns() {
   turn.on = true; turn.n = 1; turn.side = 'player';
   document.body.classList.add('xcom');
-  for (const u of tbMine()) { u.ap = 2; u.gren = u.type === 'trooper' ? 1 : 0; }
+  for (const u of tbMine()) { u.ap = 2; u.gren = u.type === 'trooper' ? 1 + (hasPerk(u, 'grenade') ? 1 : 0) : 0; }
+  turn.fp = 2;
   startGame();
+  setTimeout(tutStart, 1500);
   toast(isTouch ? 'Tap a marine, then a spot or an alien' : 'Click a marine, then a spot or an alien', 3.5);
   setTimeout(() => beginPlayerTurn(true), 400);
 }
@@ -3696,19 +3771,28 @@ function coverFrom(tx, tz, sx, sz) {
   }
   return best;
 }
-function shotInfo(a, t, ax = a.x, az = a.z, overwatch = false) {
+function shotInfo(a, t, ax = a.x, az = a.z, overwatch = false, aimed = false) {
+  if (a.type === 'eggsac' || a.burrowed) return null;
+  if (a.team === PLAYER && hiddenFoe(t)) return null;
   const d = Math.hypot(t.x - ax, t.z - az) - (t.isBase ? t.radius : 0);
-  const maxR = a.range * (a.type === 'sniper' ? 2 : 1.5);
+  if (a.type === 'burrower') return d <= 2.6 ? { chance: 85, crit: 20, cover: 0, d, melee: true } : null; // claws ignore cover
+  const squad = hasPerk(a, 'squad') && t.seen;
+  const maxR = squad ? 99 : a.range * (a.type === 'sniper' ? 2 : 1.5);
   if (d > maxR || !tbLOS(a, t, ax, az)) return null;
   if (t.isBase) return { chance: 95, crit: 0, cover: 0, d };
   let aim = a.acc * 100 * (a.team === ENEMY ? 0.85 : 1);
-  if (d > a.range) aim -= (d - a.range) * 3;
+  if (d > a.range) aim -= squad && d > a.range * 2 ? 10 + a.range * 3 : (d - a.range) * 3;
   if (a.type === 'heavy' && d < 5) aim += 15;
   if (a.type === 'sniper' && d < 4) aim -= 15;
   const cover = coverFrom(t.x, t.z, ax, az);
-  aim -= [0, 20, 40][cover] + (t.hunker ? (cover ? 20 : 10) : 0);
-  if (overwatch) aim -= 15;
-  return { chance: Math.round(Math.max(5, Math.min(95, aim))), crit: cover ? 10 : 45 + (a.type === 'sniper' ? 15 : 0), cover, d };
+  aim -= [0, 20, 40][cover] + (t.hunker ? (cover ? 20 : 10) : 0) + (t.wall ? 20 : 0);
+  if (overwatch) aim -= 15 + (hasPerk(t, 'reflex') ? 25 : 0);
+  if (hasPerk(a, 'deadeye')) aim += 10;
+  if (hasPerk(a, 'breach') && d < 6) aim += 20;
+  if (hasPerk(a, 'hunter') && !cover) aim += 15;
+  if (aimed) aim += 20;
+  const crit = (cover ? 10 : 45 + (a.type === 'sniper' ? 15 : 0)) + (hasPerk(a, 'shred') ? 15 : 0) + (aimed ? 20 : 0);
+  return { chance: Math.round(Math.max(5, Math.min(95, aim))), crit: Math.min(100, crit), cover, d };
 }
 function tbDamage(a) {
   const s = TBS[a.type] || TBS.trooper;
@@ -3726,7 +3810,8 @@ function turnUnit(u, dt) {
   u.invulnT = (u.invulnT || 0) - dt;
   if (u.pauseT > 0) { u.pauseT -= dt; return; }
   if (!u.path) return;
-  const sp = u.speed; u.speed *= 1.8;
+  const sp = u.speed; u.speed *= u.burrowed || u.fastMove ? 3.5 : turn.fast && u.team === ENEMY ? 3.5 : 1.8;
+  if (u.burrowed && Math.random() < 0.35) puff(u.x + (Math.random() - 0.5) * 0.6, 0.12, u.z + (Math.random() - 0.5) * 0.6, 0.7, 0x9a7058, 0.9, 0.4, 0.6); // something moves under the ground
   const done = moveAlong(u, dt);
   u.speed = sp;
   if (u.moving) for (const w of entities) {
@@ -3735,6 +3820,7 @@ function turnUnit(u, dt) {
     const info = shotInfo(w, u, w.x, w.z, true); if (!info) continue;
     w.ow = false; u.pauseT = 0.8;
     floatText(w.x, w.z, 'OVERWATCH', '#ffd36a', true);
+    if (w.team === PLAYER) bark(w, 'ow');
     tbShoot(w, u, { overwatch: true, cam: false });
   }
   if (done || u.dead) { u.path = null; if (u.moveDone) { const f = u.moveDone; u.moveDone = null; f(); } }
@@ -3747,7 +3833,8 @@ function tbMove(u, x, z, path) {
   });
 }
 async function tbShoot(a, t, opt = {}) {
-  const info = shotInfo(a, t, a.x, a.z, opt.overwatch) || { chance: 5, crit: 0, cover: 0 };
+  if (a.team === ENEMY) { a.revealN = turn.n + 1; tbVision(); } // attacking gives an alien away
+  const info = shotInfo(a, t, a.x, a.z, opt.overwatch, opt.aimed) || { chance: 5, crit: 0, cover: 0 };
   a.facing = facingFor(t.x - a.x, t.z - a.z);
   if (opt.cam !== false) setActionCam(a, t);
   await wait(opt.cam === false ? 120 : a.team === ENEMY ? 450 : 650);
@@ -3755,7 +3842,16 @@ async function tbShoot(a, t, opt = {}) {
   a.facing = facingFor(t.x - a.x, t.z - a.z);
   const hit = Math.random() * 100 < info.chance, crit = hit && Math.random() * 100 < info.crit;
   (window.__tblog = window.__tblog || []).push(`${a.team ? 'alien' : 'marine'} ${a.type} > ${t.type || 'base'} ${info.chance}% ${hit ? 'hit' : 'miss'}`);
-  let dmg = Math.round(tbDamage(a) * (crit ? 1.5 : 1) * (t.isBase ? TB_BASE_DMG : 1));
+  let dmg = Math.round(tbDamage(a) * (crit ? 1.5 : 1) * (t.isBase ? TB_BASE_DMG : 1) * (hasPerk(t, 'iron') ? 0.75 : 1));
+  if (info.melee) { // a burrower lunges
+    a.fireT = 0.4; sfx('bawk', a.x, a.z);
+    await wait(250);
+    if (hit && !t.dead) { damage(t, dmg, a); floatText(t.x, t.z, crit ? `CRIT ${dmg}` : String(dmg), '#ff5a3c', crit); impactPuff(new THREE.Vector3(t.x, 1, t.z), 0xffc080, 8); if (t.team === PLAYER) bark(t, t.dead ? 'down' : 'hurt'); }
+    else if (!hit) floatText(t.x, t.z, 'MISS', '#cfd8e3', false);
+    await wait(opt.cam === false ? 250 : 500);
+    if (opt.cam !== false) setActionCam(null);
+    return;
+  }
   const n = a.type === 'trooper' || a.elite ? 3 : 1;
   const kind = a.elite ? 'gold' : a.team === PLAYER ? 'corn' : 'seed', speed = a.type === 'sniper' ? 110 : 70;
   const ty = t.isBase ? 1.5 : 1.0;
@@ -3776,13 +3872,18 @@ async function tbShoot(a, t, opt = {}) {
     if (!last) await wait(a.type === 'trooper' ? 95 : 120);
   }
   await Promise.race([arrived, wait(900)]);
+  let killed = false;
   if (hit && !t.dead) {
+    const sh = t.shieldHP > 0;
     damage(t, dmg, a);
-    floatText(t.x, t.z, crit ? `CRIT ${dmg}` : String(dmg), crit ? '#ff5a3c' : '#fff07a', crit);
+    floatText(t.x, t.z, sh ? (t.shieldHP > 0 ? 'SHIELDED' : `SHIELD BROKEN · ${dmg}`) : crit ? `CRIT ${dmg}` : String(dmg), sh ? '#7fc8ff' : crit ? '#ff5a3c' : '#fff07a', crit);
     impactPuff(new THREE.Vector3(tx, ty, tz), t.team === ENEMY ? 0x9cff3a : 0xffc080, 6);
-    if (t.dead && a.team === PLAYER) floatText(t.x, t.z + 0.01, 'KILL', '#ff8a6a', true);
-  } else if (!hit) floatText(t.x, t.z, 'MISS', '#cfd8e3', false);
-  await wait(opt.cam === false ? 250 : a.team === ENEMY ? 450 : 650);
+    killed = t.dead;
+    if (killed && a.team === PLAYER) { floatText(t.x, t.z + 0.01, 'KILL', '#ff8a6a', true); if (opt.cam !== false) game.slowmo = 0.95; bark(a, 'kill'); }
+    else if (crit && a.team === PLAYER) { bark(a, 'crit'); if (turn.fp < FOCUS_MAX) turn.fp++; }
+    if (t.team === PLAYER) bark(t, t.dead ? 'down' : 'hurt');
+  } else if (!hit) { floatText(t.x, t.z, 'MISS', '#cfd8e3', false); if (a.team === PLAYER) bark(a, 'miss'); }
+  await wait(opt.cam === false ? 250 : a.team === ENEMY ? 450 : killed ? 1300 : 650);
   if (opt.cam !== false) setActionCam(null);
 }
 // over-the-shoulder action camera for shots, eased in and out
@@ -3807,24 +3908,28 @@ async function tbActivate() {
   const woke = [];
   for (const h of tbFoes()) {
     if (h.alert) continue;
-    if (tbMine().some(u => Math.hypot(u.x - h.x, u.z - h.z) < 15 && tbLOS(u, h)) || h.hp < h.maxHp) woke.push(h);
+    if (h.seen || h.hp < h.maxHp) woke.push(h);
   }
   for (const h of woke.slice()) for (const o of tbFoes()) if (!o.alert && !woke.includes(o) && Math.hypot(o.x - h.x, o.z - h.z) < 7) woke.push(o);
   if (!woke.length) return;
   for (const h of woke) h.alert = true;
   radio(woke.length > 1 ? `Contact! ${woke.length} aliens spotted us` : 'Contact! An alien spotted us', 'warn');
   sfx('bawk', woke[0].x, woke[0].z);
+  for (const h of woke) { h.revealN = turn.n; floatText(h.x, h.z, '!', '#ff5a3c', true); }
+  const spotter = tbMine().sort((a, b) => Math.hypot(a.x - woke[0].x, a.z - woke[0].z) - Math.hypot(b.x - woke[0].x, b.z - woke[0].z))[0];
+  bark(spotter, 'contact');
+  if (spotter && turn.side === 'player') { setActionCam(spotter, woke[0]); await wait(1300); setActionCam(null); } // the reveal: look over a shoulder at what just showed up
   focusOn(woke[0].x, woke[0].z);
-  for (const h of woke) floatText(h.x, h.z, '!', '#ff5a3c', true);
-  await wait(500);
-  await Promise.all(woke.map(h => { const s = pickSpot(h, 0.6); return s ? tbMove(h, s.x, s.z, s.path) : null; })); // the scramble
+  await wait(400);
+  tutEvent('contact');
+  await Promise.all(woke.filter(h => h.type !== 'eggsac' && h.type !== 'burrower').map(h => { const s = pickSpot(h, 0.6); return s ? tbMove(h, s.x, s.z, s.path) : null; })); // the scramble
 }
 
 // ---- player turn
 function beginPlayerTurn(first = false) {
   if (mode === 'over') return;
   turn.side = 'player'; turn.busy = false; turn.tool = 'move'; turn.pending = null; turn.liveUsed = false;
-  for (const u of tbMine()) { u.ap = 2; u.hunker = false; u.ow = false; }
+  for (const u of tbMine()) { u.ap = 2; u.hunker = false; u.ow = false; u.wall = false; }
   showTurnBanner(first ? 'YOUR SQUAD' : 'YOUR TURN', `Turn ${turn.n}`);
   tbSelect(tbMine()[0] || null);
   updateButtons();
@@ -3861,12 +3966,12 @@ function moveCost(u, x, z) {
   if (!isFree(toCell(x), toCell(z))) return null;
   if (entities.some(e => !e.dead && e !== u && !e.isBase && Math.hypot(e.x - x, e.z - z) < 0.9)) return null;
   const path = findPath(u.x, u.z, x, z);
-  const L = pathLen(u, path), R = (TBS[u.type] || TBS.trooper).move;
+  const L = pathLen(u, path), R = moveR(u);
   const ap = L <= R ? 1 : L <= R * 2 && u.ap >= 2 ? 2 : 0;
   return ap && ap <= u.ap ? { path, ap, L } : { path, ap: 0, L };
 }
 function coverAtSpot(x, z) { // best cover against the aliens that know about you
-  const seen = tbFoes().filter(h => h.alert);
+  const seen = tbFoes().filter(h => h.alert && h.seen);
   if (!seen.length) return -1;
   return Math.min(...seen.map(h => coverFrom(x, z, h.x, h.z)));
 }
@@ -3875,7 +3980,7 @@ function turnTap(ent, gp, { secondary, touch }) {
   if (secondary) { turn.pending = null; turn.tool = 'move'; return; }
   if (!ent && gp) { // a tap near an alien counts as tapping the alien
     let best = null, bd = 1.4;
-    for (const h of tbFoes()) { const d = Math.hypot(h.x - gp.x, h.z - gp.z); if (d < bd) { bd = d; best = h; } }
+    for (const h of tbFoes()) { if (hiddenFoe(h)) continue; const d = Math.hypot(h.x - gp.x, h.z - gp.z); if (d < bd) { bd = d; best = h; } }
     ent = best;
   }
   const u = turn.sel;
@@ -3899,11 +4004,18 @@ function turnTap(ent, gp, { secondary, touch }) {
     return;
   }
   if (ent && (ent.team === ENEMY || ent.isBase && ent.team === ENEMY)) {
-    const info = shotInfo(u, ent);
+    const aimed = turn.tool === 'aimed';
+    if (aimed && u.ap < 2) { toast('Aimed shot takes both actions', 1); return; }
+    const info = shotInfo(u, ent, u.x, u.z, false, aimed);
     if (!info) { toast(ent.isBase ? 'No clear shot at the hive from here' : 'No line of sight, or out of range', 1.2); return; }
     const p = turn.pending;
-    if (!(p && p.kind === 'shot' && p.t === ent)) { turn.pending = { kind: 'shot', t: ent, info }; return; } // first tap: show the odds
-    tbAct(async () => { u.ap = 0; await tbShoot(u, ent); });
+    if (!(p && p.kind === 'shot' && p.t === ent)) { turn.pending = { kind: 'shot', t: ent, info, aimed }; return; } // first tap: show the odds
+    tbAct(async () => {
+      if (aimed) { u.cdAbil = turn.n + ABIL.sniper.cd; turn.tool = 'move'; floatText(u.x, u.z, 'AIMED SHOT', '#ffd36a', true); }
+      u.ap = !aimed && u.ap === 2 && hasPerk(u, 'rapid') ? 1 : 0;
+      await tbShoot(u, ent, { aimed });
+      tutEvent('shot');
+    });
     return;
   }
   if (!gp) return;
@@ -3912,7 +4024,7 @@ function turnTap(ent, gp, { secondary, touch }) {
   if (!mc.ap) { toast(u.ap >= 2 ? 'Too far, even dashing' : 'Too far for one action', 1); return; }
   const p = turn.pending;
   if (touch && !(p && p.kind === 'move' && Math.hypot(p.x - gp.x, p.z - gp.z) < 1.2)) { turn.pending = { kind: 'move', x: gp.x, z: gp.z, ...mc }; return; }
-  tbAct(async () => { u.ap -= mc.ap; await tbMove(u, gp.x, gp.z, mc.path); });
+  tbAct(async () => { u.ap -= mc.ap; await tbMove(u, gp.x, gp.z, mc.path); tutEvent('move'); });
 }
 // ---- drop in: once per turn, a marine with actions left can be played live in first person for 20 seconds.
 // Everything fights in real time (both sides hold their ground and shoot back), then the battle freezes and the turns resume.
@@ -3921,6 +4033,8 @@ function tbDropIn() {
   const u = turn.sel;
   if (!u || u.dead || u.ap <= 0 || turn.busy || turn.side !== 'player') return;
   if (turn.liveUsed) { toast('One live drop-in per turn', 1.2); return; }
+  if (turn.fp < LIVE_COST) { toast(`Drop in costs ${LIVE_COST} Focus. Kills and crits earn Focus.`, 1.6); return; }
+  turn.fp -= LIVE_COST; bark(u, 'live'); tutEvent('live');
   turn.liveUsed = true; turn.busy = true; turn.pending = null; turn.tool = 'move';
   turn.live = true; turn.liveT = LIVE_TIME; game.relink = 0;
   for (const e of entities) if (!e.dead && !e.isBase) { e.order = { type: 'idle' }; e.path = null; e.anchor = null; e.ow = false; }
@@ -3959,8 +4073,21 @@ function tbHunker() {
   tbAfterAction();
 }
 function tbGrenadeTool() {
-  const u = turn.sel; if (!u || u.ap <= 0 || turn.side !== 'player') return;
-  if (u.type !== 'trooper') { toast('Only marines carry frag grenades', 1); return; }
+  const u = turn.sel; if (!u || u.ap <= 0 || turn.side !== 'player' || turn.busy) return;
+  const cd = (u.cdAbil || 0) - turn.n;
+  if (u.type !== 'trooper' && cd > 0) { toast(`${ABIL[u.type].name} is ready in ${cd} turn${cd > 1 ? 's' : ''}`, 1.2); return; }
+  if (u.type === 'heavy') { // shield wall: hunker down and cover every marine within 3.5m
+    u.hunker = true; u.ap = 0; u.cdAbil = turn.n + ABIL.heavy.cd;
+    for (const m of tbMine()) if (Math.hypot(m.x - u.x, m.z - u.z) < 3.5) { m.wall = true; burst(m.x, 1, m.z, 0.7, 0x7fc8ff); }
+    floatText(u.x, u.z, 'SHIELD WALL', '#7fc8ff', true); sfx('chime');
+    tbAfterAction(); return;
+  }
+  if (u.type === 'sniper') {
+    if (u.ap < 2) { toast('Aimed shot takes both actions', 1.2); return; }
+    turn.tool = turn.tool === 'aimed' ? 'move' : 'aimed'; turn.pending = null;
+    if (turn.tool === 'aimed') toast('Aimed shot: +20 aim, +20 crit. Pick a target.', 1.6);
+    return;
+  }
   if (!u.gren) { toast('No grenades left', 1); return; }
   turn.tool = turn.tool === 'grenade' ? 'move' : 'grenade'; turn.pending = null;
   if (turn.tool === 'grenade') toast(isTouch ? 'Tap where it lands, tap again to throw' : 'Click where it lands', 1.4);
@@ -3976,6 +4103,7 @@ async function tbEndTurn() {
   tbReinforce();
   await tbActivate();
   for (const h of tbFoes()) h.ow = false;
+  tbHiveRules();
   const acting = tbFoes().filter(h => h.alert).sort((a, b) => nearestDist(a) - nearestDist(b));
   for (const h of acting) {
     if (mode === 'over' || !tbMine().length) break;
@@ -4026,6 +4154,7 @@ function pickSpot(h, scale = 1) {
     const mine = tbMine().filter(u => Math.hypot(u.x - x, u.z - z) < 22);
     if (mine.length) s += Math.min(...mine.map(u => coverFrom(x, z, u.x, u.z))) * 0.55; // stay in cover
     if (h.type === 'sniper' && gd < 7) s -= 1;
+    if (h.type === 'shielder') s += tbFoes().filter(o => o !== h && Math.hypot(o.x - x, o.z - z) < 5).length * 0.4;
     s += Math.random() * 0.25;
     if (!best || s > best.s) best = { x, z, s };
   }
@@ -4040,9 +4169,11 @@ function pickSpot(h, scale = 1) {
   return { ...best, path };
 }
 async function alienAct(h) {
+  if (h.type === 'eggsac') return;
   h.ap = 2;
-  focusOn(h.x, h.z);
-  await wait(200);
+  if (h.type === 'burrower') { await burrowerAct(h); return; }
+  const vis = () => h.seen;
+  if (vis()) { focusOn(h.x, h.z); await wait(200); }
   while (h.ap > 0 && !h.dead && mode !== 'over' && tbMine().length) {
     const shot = bestShot(h, h.x, h.z);
     if (shot && (shot.info.chance >= 45 || (h.ap === 1 && shot.info.chance >= 15))) { h.ap = 0; await tbShoot(h, shot.t); break; }
@@ -4050,11 +4181,54 @@ async function alienAct(h) {
     const spot = pickSpot(h);
     if (!spot) { if (shot) { h.ap = 0; await tbShoot(h, shot.t); } break; }
     h.ap--;
-    focusOn(spot.x, spot.z);
+    const seenBefore = vis();
+    if (seenBefore) focusOn(spot.x, spot.z);
+    if (!seenBefore) h.fastMove = true;
     await tbMove(h, spot.x, spot.z, spot.path);
-    await wait(150);
+    h.fastMove = false;
+    if (seenBefore || vis()) await wait(150);
   }
   h.ap = 0;
+}
+// burrowers tunnel under everything (only a dust trail gives them away), surface next to a marine and claw
+async function burrowerAct(h) {
+  const near = () => tbMine().sort((a, b) => Math.hypot(a.x - h.x, a.z - h.z) - Math.hypot(b.x - h.x, b.z - h.z))[0];
+  while (h.ap > 0 && !h.dead && mode !== 'over' && tbMine().length) {
+    const t = near();
+    if (Math.hypot(t.x - h.x, t.z - h.z) <= 2.6 && !h.burrowed) { h.ap = 0; await tbShoot(h, t, { cam: true }); break; }
+    const d = Math.hypot(t.x - h.x, t.z - h.z), R = TBS.burrower.move;
+    let x, z;
+    if (d - 1.5 <= R) { x = t.x + (h.x - t.x) / d * 1.5; z = t.z + (h.z - t.z) / d * 1.5; }
+    else { x = h.x + (t.x - h.x) / d * R; z = h.z + (t.z - h.z) / d * R; }
+    const [fi, fj] = nearestFree(toCell(x), toCell(z)); x = cellCenter(fi); z = cellCenter(fj);
+    h.ap--; h.burrowed = true; h.seen = false;
+    await tbMove(h, x, z, [{ x, z }]);
+    if (Math.hypot(t.x - h.x, t.z - h.z) <= 3) { // surface
+      h.burrowed = false; h.revealN = turn.n + 1; tbVision();
+      smoke(h.x, 0.4, h.z, 1.4, 6); sfx('boom', h.x, h.z); focusOn(h.x, h.z); fps.shake = Math.min(0.4, fps.shake + 0.2);
+      floatText(h.x, h.z, 'BURROWER!', '#ff8a5a', true);
+      await wait(500);
+    }
+  }
+  h.ap = 0;
+}
+// egg sacs hatch a skitter each turn (3 at most); wardens shield every alien near them
+function tbHiveRules() {
+  for (const h of tbFoes()) {
+    if (h.type === 'eggsac' && (h.alert || h.seen) && (h.hatched || 0) < 3 && tbFoes().length < 16) {
+      h.hatched = (h.hatched || 0) + 1;
+      const a = Math.random() * Math.PI * 2, [fi, fj] = nearestFree(toCell(h.x + Math.cos(a) * 1.6), toCell(h.z + Math.sin(a) * 1.6));
+      const k = makeUnit(ENEMY, 'trooper', cellCenter(fi), cellCenter(fj)); k.alert = true;
+      puff(k.x, 0.4, k.z, 1, 0x9cff3a, 0.8, 0.8, 0.7);
+      if (h.seen) floatText(h.x, h.z, 'HATCHED', '#9cff3a', true);
+    }
+    if (h.type === 'shielder' && h.alert) for (const o of tbFoes()) {
+      if (o === h || o.type === 'eggsac' || Math.hypot(o.x - h.x, o.z - h.z) > 5) continue;
+      o.shieldHP = 20;
+      if (!o.bubble) { o.bubble = noRay(new THREE.Mesh(sphere14(), new THREE.MeshBasicMaterial({ color: 0x7fc8ff, transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending }))); o.bubble.scale.setScalar(1.2 * (o.baseScale || 1)); o.bubble.position.y = 0.8; o.mesh.add(o.bubble); }
+      o.bubble.visible = true;
+    }
+  }
 }
 // relays: a marine (and no alien) standing on one at the end of your turn captures it over two turns
 function tbRelays() {
@@ -4082,7 +4256,7 @@ function tbReinforce() {
   if (!(turn.n % (rule.every || 1) === 0)) return;
   const n = Math.min((rule.spawn || 2) + (turn.n >= 5 ? 1 : 0), 12 - alive);
   for (let i = 0; i < n; i++) {
-    const type = i % 4 === 3 ? 'sniper' : i % 3 === 2 ? 'heavy' : 'trooper';
+    const type = i === 0 && turn.n >= 3 ? (turn.n % 2 ? 'burrower' : 'shielder') : i % 4 === 3 ? 'sniper' : i % 3 === 2 ? 'heavy' : 'trooper';
     const x = (Math.random() - 0.5) * 16, z = -20 - Math.random() * 2;
     const h = makeUnit(ENEMY, type, x, z); h.alert = true;
     smoke(x, 0.4, z, 1.4, 4);
@@ -4096,20 +4270,27 @@ function showTurnBanner(title, sub) {
   void b.offsetWidth; b.classList.add('show');
 }
 function turnTick(dt) {
+  turn.visT = (turn.visT || 0) - dt;
+  if (turn.visT <= 0) { turn.visT = 0.15; tbVision(); }
   if (turn.focusT > 0) { turn.focusT -= dt; rts.focus.lerp(turn.focus, Math.min(1, dt * 4)); }
   if (!turn.cam && trans === null && camera.aspect < 1) rts.zoom = Math.max(rts.zoom, 34);
   const tag = $('modeTag');
-  tag.innerHTML = turn.side === 'player' ? `<b>YOUR TURN</b> ${turn.n}` : '<b>ALIEN TURN</b>';
+  tag.innerHTML = (turn.side === 'player' ? `<b>YOUR TURN</b> ${turn.n}` : `<b>ALIEN TURN</b>${turn.fast ? ' ⏩' : ''}`) + ` <span class="fp" title="Focus: earned by kills and crits, spent to drop in">◆ ${turn.fp}</span>`;
   tag.className = turn.side === 'player' ? 'plan' : 'op';
   const u = turn.sel;
   const can = turn.side === 'player' && !turn.busy && u && !u.dead && u.ap > 0;
   $('btnOW').classList.toggle('off', !can);
   $('btnHunker').classList.toggle('off', !can);
-  $('btnTLive').classList.toggle('off', !can || turn.liveUsed);
-  $('btnTGren').classList.toggle('off', !can || u.type !== 'trooper' || !u.gren);
-  $('btnTGren').classList.toggle('armed', turn.tool === 'grenade');
+  $('btnTLive').classList.toggle('off', !can || turn.liveUsed || turn.fp < LIVE_COST);
+  setLabel('btnTLive', `Drop in · ◆${LIVE_COST}`);
+  const cd = u ? (u.cdAbil || 0) - turn.n : 0;
+  $('btnTGren').classList.toggle('off', !can || (u.type === 'trooper' ? !u.gren : cd > 0 || (u.type === 'sniper' && u.ap < 2)));
+  $('btnTGren').classList.toggle('armed', turn.tool === 'grenade' || turn.tool === 'aimed');
   $('btnEndTurn').classList.toggle('off', turn.side !== 'player' || turn.busy);
-  setLabel('btnTGren', u && u.type === 'trooper' ? `Grenade · ${u.gren || 0}` : 'Grenade');
+  $('btnFast').classList.toggle('armed', turn.fast);
+  if (u) setLabel('btnTGren', u.type === 'trooper' ? `Grenade · ${u.gren || 0}` : cd > 0 ? `${ABIL[u.type].name} · ${cd}` : ABIL[u.type].name);
+  const ic = $('btnTGren').querySelector('i'); if (ic && u) ic.textContent = u.type === 'trooper' ? '💣' : u.type === 'heavy' ? '🛡' : '🎯';
+  for (const h of tbFoes()) if (h.bubble) h.bubble.visible = h.shieldHP > 0;
   if (u && !u.dead) $('selInfo').textContent = `${u.callsign || nameOf(u)} · ${'●'.repeat(Math.max(0, u.ap))}${'○'.repeat(Math.max(0, 2 - u.ap))} · ${Math.ceil(u.hp)}/${u.maxHp} hp`;
   else if (turn.side === 'enemy') $('selInfo').textContent = 'The swarm is moving…';
 }
@@ -4127,15 +4308,22 @@ function drawTurnUI() {
     const tag = (m.ow ? '👁 ' : '') + (m.hunker ? '🛡 ' : '') + (turn.side === 'player' ? '●'.repeat(Math.max(0, m.ap)) + '○'.repeat(Math.max(0, 2 - m.ap)) : '');
     octx.strokeText(tag, s.x, s.y); octx.fillStyle = m === u ? '#9dffc4' : '#cfe8ff'; octx.fillText(tag, s.x, s.y);
   }
+  for (const h of tbFoes()) { // name the special aliens so you learn what they do
+    if (hiddenFoe(h) || !['burrower', 'shielder', 'eggsac', 'elite'].includes(h.type)) continue;
+    const s = toScreen(h.x, h.type === 'elite' ? 3.4 : 2.2, h.z); if (s.behind) continue;
+    octx.font = '800 11px system-ui'; octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.7)';
+    const t = { burrower: 'BURROWER · tunnels', shielder: 'WARDEN · shields allies', eggsac: `EGG SAC · hatches ${3 - (h.hatched || 0)}`, elite: 'HIVE TYRANT' }[h.type];
+    octx.strokeText(t, s.x, s.y); octx.fillStyle = '#ffb48a'; octx.fillText(t, s.x, s.y);
+  }
   for (const h of tbFoes()) {
-    if (!h.ow) continue;
+    if (!h.ow || hiddenFoe(h)) continue;
     const s = toScreen(h.x, 2.4, h.z); if (s.behind) continue;
     octx.font = '900 12px system-ui'; octx.fillStyle = '#ff8a6a';
     octx.fillText('👁 OVERWATCH', s.x, s.y);
   }
   if (turn.side !== 'player' || !u || u.dead) return;
   // move range: blue for one action, yellow for a dash
-  const R = (TBS[u.type] || TBS.trooper).move;
+  const R = moveR(u);
   if (u.ap > 0 && turn.tool === 'move') {
     octx.lineWidth = 2;
     groundCircle(u.x, u.z, R, 48); octx.strokeStyle = 'rgba(90,190,255,.75)'; octx.fillStyle = 'rgba(90,190,255,.07)'; octx.fill(); octx.stroke();
@@ -4144,7 +4332,7 @@ function drawTurnUI() {
   // hit chances on every alien this marine can shoot
   for (const h of tbFoes().concat(enemyBase && !enemyBase.dead ? [enemyBase] : [])) {
     if (u.ap <= 0) break;
-    const info = shotInfo(u, h); if (!info) continue;
+    const info = shotInfo(u, h, u.x, u.z, false, turn.tool === 'aimed'); if (!info) continue;
     const s = toScreen(h.x, h.isBase ? 6 : 2.7, h.z); if (s.behind) continue;
     const sel = turn.pending && turn.pending.t === h;
     label(s.x, s.y, `${info.chance}%${info.cover === 0 && !h.isBase ? ' · FLANKED' : info.cover === 1 ? ' · ◐' : info.cover === 2 ? ' · ●' : ''}`, sel ? '#ffffff' : info.chance >= 65 ? '#9dffc4' : info.chance >= 40 ? '#ffd36a' : '#ff9a8a');
@@ -4173,7 +4361,7 @@ function drawTurnUI() {
     const a = proj(u.x, u.z), b = proj(pv.t.x, pv.t.z);
     octx.strokeStyle = '#ff6a5a'; octx.lineWidth = 2; octx.setLineDash([4, 5]); octx.beginPath(); octx.moveTo(a.x, a.y); octx.lineTo(b.x, b.y); octx.stroke(); octx.setLineDash([]);
     const i = pv.info, dmg = TBS[u.type] || TBS.trooper, k = u.dmg / TYPES[u.type].dmg * (pv.t.isBase ? TB_BASE_DMG : 1);
-    label(b.x, b.y + 34, `Shoot · ${i.chance}% hit · ${i.crit}% crit · ${Math.round(dmg.dmg[0] * k)}-${Math.round(dmg.dmg[1] * k)} dmg · ${isTouch ? 'tap again' : 'click again'}`, '#ffd0c8');
+    label(b.x, b.y + 34, `${pv.aimed ? 'Aimed shot' : 'Shoot'} · ${i.chance}% hit · ${i.crit}% crit · ${Math.round(dmg.dmg[0] * k)}-${Math.round(dmg.dmg[1] * k)} dmg · ${isTouch ? 'tap again' : 'click again'}`, '#ffd0c8');
     return;
   }
   if (pv && pv.kind === 'move') {
@@ -4197,6 +4385,32 @@ function drawTurnUI() {
 canvas.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') turn.hover = { x: e.clientX, y: e.clientY }; });
 tapButton($('btnOW'), tbOverwatch);
 tapButton($('btnTLive'), tbDropIn);
+function toggleFast() { turn.fast = !turn.fast; try { localStorage.setItem('hivefall.fast', turn.fast ? '1' : '0'); } catch (e) { /* ignore */ } toast(turn.fast ? 'Alien turns: fast' : 'Alien turns: normal speed', 1); }
+tapButton($('btnFast'), toggleFast);
+// first-mission coach: one short card at a time, advanced by doing the thing it describes
+const TUT = [
+  'Your squad. The blue ring is how far a marine moves for 1 action; the dashed yellow ring is a dash (2 actions). Tap inside the blue ring to move.',
+  'Rocks and containers give cover where you stand: ⛊ full, ◐ half. Aliens stay hidden until a marine sees them. Move the others, then End turn.',
+  'Contact! Tap an alien to see your hit chance, tap again to fire. If it has no cover on your side it is FLANKED: an easy crit.',
+  'Overwatch shoots the first alien that moves. Each class has an ability: Grenade, Shield wall, Aimed shot. Kills earn ◆ Focus; spend 2 to Drop in and fight live for 20s.',
+];
+function tutShow(i) {
+  turn.tut = i;
+  const c = $('coach'); if (!c) return;
+  c.innerHTML = `<p>${TUT[i]}</p><button id="coachX">${i === TUT.length - 1 ? 'Got it' : 'Hide tips'}</button>`;
+  c.classList.remove('hidden');
+  $('coachX').onclick = () => tutDone();
+}
+function tutDone() { turn.tut = -1; $('coach').classList.add('hidden'); try { localStorage.setItem('hivefall.tut', 'done'); } catch (e) { /* ignore */ } }
+function tutStart() {
+  let done = false; try { done = localStorage.getItem('hivefall.tut') === 'done'; } catch (e) { /* ignore */ }
+  if (!done && camp.m && camp.m.story && story.checkpoint === 0) tutShow(0);
+}
+function tutEvent(ev) {
+  if (turn.tut < 0) return;
+  const i = { move: 1, contact: 2, shot: 3 }[ev];
+  if (ev === 'live') tutDone(); else if (i > turn.tut) tutShow(i);
+}
 tapButton($('btnHunker'), tbHunker);
 tapButton($('btnTGren'), tbGrenadeTool);
 tapButton($('btnTNext'), tbNext);
@@ -4206,6 +4420,7 @@ function turnKey(code) {
   else if (code === 'KeyO' || code === 'KeyY') tbOverwatch();
   else if (code === 'KeyH') tbHunker();
   else if (code === 'KeyF') tbDropIn();
+  else if (code === 'Space') toggleFast();
   else if (code === 'KeyG') tbGrenadeTool();
   else if (code === 'Tab' || code === 'KeyN') tbNext();
   else if (code === 'Escape') { turn.pending = null; turn.tool = 'move'; }
@@ -4298,6 +4513,13 @@ function defaultPick(m) {
   for (const r of active) if (pick.length < m.squad && !pick.includes(r.id)) pick.push(r.id);
   return pick;
 }
+function perkRow(r, rk) { // chosen perks, and a pick between two when a promotion is waiting
+  const have = r.perks || [];
+  const chosen = have.length ? `<p class="perks">Perks: ${have.map(k => `<b title="${PERKS[k].text}">${PERKS[k].name}</b>`).join(' · ')}</p>` : '';
+  if (have.length >= rk || !PERK_TREE[r.type]) return chosen;
+  const opts = PERK_TREE[r.type][have.length];
+  return `${chosen}<div class="perkPick"><span>★ Promotion: pick a perk for ${r.name}</span>${opts.map(k => `<button class="perkOpt" data-id="${r.id}" data-perk="${k}"><b>${PERKS[k].name}</b><small>${PERKS[k].text}</small></button>`).join('')}</div>`;
+}
 function renderCampaign() {
   const s = campState, m = MISSIONS[campSel];
   if (!campPick) campPick = defaultPick(m);
@@ -4311,7 +4533,7 @@ function renderCampaign() {
   const row = r => {
     const rk = rankOf(r.xp), on = campPick.includes(r.id);
     const next = RANKS[rk + 1];
-    return `<button class="mar${on ? ' on' : ''}" data-id="${r.id}"><i>${ICONS[r.type]}</i><span><b>${callsign(r)}</b><small>${NAMES[PLAYER][r.type]} · ${r.kills} kills · ${r.missions} missions${(r.relics || []).length ? ` · ${r.relics.length} relic${r.relics.length > 1 ? "s" : ""}` : ""}${next ? ` · ${next.xp - r.xp} xp to ${next.tag}` : ''}</small></span><em>${chevrons(rk)}</em></button>`;
+    return `<div class="marWrap"><button class="mar${on ? ' on' : ''}" data-id="${r.id}"><i>${ICONS[r.type]}</i><span><b>${callsign(r)}</b><small>${NAMES[PLAYER][r.type]} · ${r.kills} kills · ${r.missions} missions${(r.relics || []).length ? ` · ${r.relics.length} relic${r.relics.length > 1 ? "s" : ""}` : ""}${next ? ` · ${next.xp - r.xp} xp to ${next.tag}` : ''}</small></span><em>${chevrons(rk)}</em></button>${perkRow(r, rk)}</div>`;
   };
   $('campMap').innerHTML = nodes;
   $('campBrief').innerHTML = `
@@ -4330,6 +4552,8 @@ $('campMap').addEventListener('click', e => {
   campSel = +b.dataset.i; campPick = null; renderCampaign();
 });
 $('campBrief').addEventListener('click', e => {
+  const po = e.target.closest('.perkOpt');
+  if (po) { const r = campState.roster.find(x => x.id === +po.dataset.id); if (r) { (r.perks = r.perks || []).push(po.dataset.perk); campSave(campState); toast(`${r.name}: ${PERKS[po.dataset.perk].name}`, 1.2); } renderCampaign(); return; }
   const b = e.target.closest('.mar'); if (!b) return;
   const id = +b.dataset.id, m = MISSIONS[campSel];
   if (campPick.includes(id)) campPick = campPick.filter(x => x !== id);
@@ -4379,7 +4603,8 @@ function launchMission(i, pick, checkpoint = 0) {
   if (!m.story) {
     for (const e of entities) if (e.team === ENEMY && !e.isBase) { e.dead = true; scene.remove(e.mesh); }
     entities = entities.filter(e => !e.dead);
-    for (const [t, x, z] of [['trooper', -14, -15], ['trooper', 14, -15], ['trooper', -4, -13], ['trooper', 4, -13], ['heavy', -9, -18], ['heavy', 9, -18], ['sniper', -2, -20], ['sniper', 2, -20]]) makeUnit(ENEMY, t, x, z).alert = true;
+    const extra = { hunt: [['burrower', 0, -10]], blackout: [['shielder', 0, -16]], hivefall: [['eggsac', -6, -16], ['eggsac', 6, -16], ['shielder', 0, -17]] }[m.id] || [];
+    for (const [t, x, z] of [['trooper', -14, -15], ['trooper', 14, -15], ['trooper', -4, -13], ['trooper', 4, -13], ['heavy', -9, -18], ['heavy', 9, -18], ['sniper', -2, -20], ['sniper', 2, -20], ...extra]) makeUnit(ENEMY, t, x, z).alert = true;
   }
   game.cp = m.ore;
   startTurns();
@@ -4395,6 +4620,7 @@ function applyRank(u, r) {
   if (rk >= 3) u.acc = Math.min(0.95, u.acc + 0.05);
   for (const k of r.relics || []) applyRelic(u, k);
   u.relics = (r.relics || []).slice();
+  u.perks = (r.perks || []).slice();
 }
 
 // ---- during a mission
@@ -4431,6 +4657,7 @@ function campaignWin(text) { if (!camp.done) endGame(true, text); }
 function campaignKill(e, src) {
   if (!camp.m) return;
   if (e.team === ENEMY && src && src.rid) src.kills = (src.kills || 0) + 1;
+  if (turn.on && e.team === ENEMY && src && src.team === PLAYER && turn.fp < FOCUS_MAX) { turn.fp++; floatText(e.x, e.z - 0.01, '+1 ◆', '#c9a0ff', false); }
   if (e.team === ENEMY && e.elite && camp.m.goal.type === 'tyrant') setTimeout(() => campaignWin('The Hive Tyrant is dead. The swarm is leaderless.'), 1200);
   if (e.team === PLAYER && e.callsign) radio(`${e.callsign} is down. KIA.`, 'warn');
 }
@@ -4454,7 +4681,7 @@ function campaignEnd(won) {
     r.kills += kills; r.missions++;
     r.xp += kills + 2 + (won ? 2 : 0);
     const after = rankOf(r.xp);
-    lines.push(`<li><i>${ICONS[r.type]}</i><b>${callsign(r)}</b><span>${kills} kills${after > before ? ` · <em>promoted to ${RANKS[after].name}!</em>` : ''}${found.length ? ` · <em class="relic">found ${found.map(k => RELICS[k].name).join(', ')}</em>` : ''}</span></li>`);
+    lines.push(`<li><i>${ICONS[r.type]}</i><b>${callsign(r)}</b><span>${kills} kills${after > before ? ` · <em>promoted to ${RANKS[after].name}! Pick a perk on the map</em>` : ''}${found.length ? ` · <em class="relic">found ${found.map(k => RELICS[k].name).join(', ')}</em>` : ''}</span></li>`);
   }
   // reinforcements you deployed during the mission and who made it join the roster
   const fresh = entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower && !e.rid);
@@ -4493,14 +4720,14 @@ const STORIES = {
       run() {
         say([['Command', 'Checkpoint Alpha. Your progress is saved.'], ['Ranger', 'Tracks everywhere. Something dragged equipment out of here.'],
           ['Command', 'Mining camp to the east. Clear it. There could be survivors.']]);
-        foes([['trooper', 12, -6], ['trooper', 16, -3], ['heavy', 14, 2], ['sniper', 19, -5], ['sniper', 9, 0]], 'idle');
+        foes([['trooper', 12, -6], ['trooper', 16, -3], ['heavy', 14, 2], ['sniper', 19, -5], ['sniper', 9, 0], ['eggsac', 17, -8]], 'idle');
       } },
     { name: 'Checkpoint Bravo', cp: [12, -1], at: [2, -15], r: 5, goal: 'Reach the comms relay',
       run() {
         say([['Command', 'Checkpoint Bravo. Camp clear?'], ['Sgt', 'Clear. No survivors. Just empty bunks.'],
           ['???', '...this is Ada Brecht at the north relay... please, they are everywhere... please hurry...'],
           ['Sgt', 'You heard her. Move up to the relay, double time.']]);
-        foes([['trooper', 19, -13], ['trooper', 17, -16], ['sniper', 8, -19], ['trooper', -6, -18]], 'idle');
+        foes([['trooper', 19, -13], ['shielder', 18, -15], ['trooper', 17, -16], ['sniper', 8, -19], ['trooper', -6, -18]], 'idle');
       } },
     { name: 'The relay', cp: [12, -13], relay: 0.35, goal: 'Reboot the relay: end a turn with a marine on it', marker: 'relay',
       run() {
@@ -4513,7 +4740,7 @@ const STORIES = {
           ['Sgt', 'It was never a survivor. It\'s a LURE! Contacts, all around us!']], 1.6);
         twistBanner('IT WAS A TRAP');
         const ring = [[15, -14], [16, -19], [10, -21], [-6, -21], [-11, -18], [-11, -12], [-5, -11], [9, -11], [13, -11], [19, -11], [4, -21]]
-          .map(([x, z], k) => [k % 4 === 3 ? 'sniper' : k % 5 === 2 ? 'heavy' : 'trooper', x, z]);
+          .map(([x, z], k) => [k === 1 || k === 6 ? 'burrower' : k === 8 ? 'shielder' : k % 4 === 3 ? 'sniper' : k % 5 === 2 ? 'heavy' : 'trooper', x, z]);
         setTimeout(() => { for (const [, x, z] of ring) smoke(x, 0.5, z, 2, 6); foes(ring, 'hunt'); }, 1800);
         const tyrant = () => { if (!camp.done) { say([['Command', 'Something big is coming out of the hive. Hold on!']]); foes([['elite', 0, -24]], 'hunt'); } };
         if (turn.on) story.later.push([2, tyrant]); else setTimeout(tyrant, 22000);
@@ -4758,7 +4985,7 @@ function frame(now) {
     if (e.upper && !(tac.on && tac.phase === 'plan')) animateBird(e, dt, now);
     e.mesh.rotation.y = e.facing;
     // in first person, a squadmate brushing past the camera would fill the screen with armour for a frame: hide anyone that close
-    e.mesh.visible = !e.possessed && !(mode === 'fps' && possessed && e.team === PLAYER && !e.isTower && Math.hypot(e.x - possessed.x, e.z - possessed.z) < 1.15);
+    e.mesh.visible = !e.possessed && !hiddenFoe(e) && !(mode === 'fps' && possessed && e.team === PLAYER && !e.isTower && Math.hypot(e.x - possessed.x, e.z - possessed.z) < 1.15);
     e.ring.visible = selection.includes(e) && mode !== 'fps';
     if (!e.elite) {
       e.bodyMat.emissive.setHex(e.flash > 0 ? 0xffffff : e.armorT > 0 ? 0x2266ff : 0);

@@ -44,6 +44,12 @@ One loop: **hold the relays, drop the shield, destroy the hive.**
 - **Your turn:** each marine has **2 actions**. Move inside the blue ring (1 action) or dash to the yellow ring (2). Shooting, **Overwatch**, **Hunker down** and **Grenade** end that marine's turn, so move first, then act.
 - **Hit chance** comes from the marine's aim, range and the target's **cover**: half cover (low barriers, ◐) −20%, full cover (containers, huts, rock, ●) −40%. Cover only counts on the side facing the shooter, so get around it: a target with no cover is **flanked** and much easier to crit. Hover (or tap once) on a spot to see the path and the cover you would have there; tap an alien once to see the odds, again to fire.
 - **Overwatch** shoots the first alien that moves in range during their turn (at −15% aim). **Hunker down** makes a marine much harder to hit until your next turn. Marines carry one frag grenade per mission: it always hits everything in the blast.
+- **Fog of war:** aliens are hidden until one of your marines has them in sight (16m, less in the storm). When a pack is spotted the camera cuts over the spotter's shoulder to show it.
+- **Class abilities:** Marine **frag grenade** (1, or 2 with Grenadier), Juggernaut **Shield wall** (hunkers and covers every marine within 3.5m, every 3 turns), Ranger **Aimed shot** (both actions, +20 aim and +20 crit, every 2 turns). Key **G**.
+- **Perks:** at each promotion a marine picks one of two perks on the sector map: Sprinter, Grenadier, Shredder, Flanker, Double tap, Lightning reflexes, Iron skin, Breacher, Squadsight, Deadeye.
+- **Focus ◆:** kills and crits earn Focus (max 4). **Drop in** costs 2.
+- **Special aliens:** the **Burrower** tunnels under walls (watch for its dust trail), ignores overwatch and claws whoever it surfaces next to; the **Warden** shields every alien within 5m (20 damage per turn); the **Egg sac** hatches a Skitter every turn, three at most.
+- **⏩ Fast** (Space) speeds up alien turns and skips their shot camera. The first story mission shows short coach cards, which you can hide.
 - **Alien turn:** aliens sit still until they see you, then the whole pack wakes up and scrambles for cover. On their turn each one moves toward you, looks for cover and flanks, and shoots when the odds are good. Their spitters set up overwatch too.
 - Relays and the story relay are captured by ending turns with a marine on them. Ore buys reinforcements during your turn. Loot left on the ground fades after three turns.
 - The shot camera cuts over the shooter's shoulder for every shot.
@@ -92,7 +98,7 @@ Win: hold all 3 relays to drop the hive's bio-shield, then destroy the hive. Los
 | Drop in | **F** or double-click a marine | Double-tap a marine or **Drop in** |
 | First person | WASD, mouse (pointer lock), click or Space to fire | Left stick, drag anywhere on the right to aim, hold **FIRE** (also aims while held); all at once, multitouch |
 | Extras | **Q**/**E** abilities, **X** ultimate, **R** reload, **G** rally, right mouse aim down sights, **C** swap, **F**/**Tab** back | Ability buttons and **★** above FIRE, **Rally squad**, **Swap marine**, **◀ Command** |
-| Campaign turns | Click a marine, click ground to move (hover shows path and cover), click an alien twice to shoot; **F** drop in live for 20s, **O** overwatch, **H** hunker, **G** grenade, **Tab** next marine, **Enter** end turn | Tap a marine, tap a spot or alien once to preview and again to confirm; one finger pans; buttons in the command bar |
+| Campaign turns | Click a marine, click ground to move (hover shows path and cover), click an alien twice to shoot; **F** drop in live for 20s, **O** overwatch, **H** hunker, **G** class ability, **Space** fast alien turns, **G** grenade, **Tab** next marine, **Enter** end turn | Tap a marine, tap a spot or alien once to preview and again to confirm; one finger pans; buttons in the command bar |
 
 ## Graphics
 

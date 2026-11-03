@@ -565,3 +565,17 @@ body.xcom #btnEndTurn { background: linear-gradient(180deg, #2f7a4a, #1e5233); }
 #turnBanner.show { animation: turnBan 1.6s ease-out forwards; }
 @keyframes turnBan { 0% { opacity: 0; transform: translate(-50%, -40%) scale(1.15); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -55%); } }
 body.xcom #btnSwap { display: none !important; }
+#modeTag .fp { color: #c9a0ff; margin-left: 6px; font-weight: 800; }
+#coach { position: fixed; left: 50%; top: 58px; transform: translateX(-50%); width: min(520px, calc(100vw - 32px)); z-index: 25;
+  background: rgba(12, 18, 26, .9); border: 1px solid rgba(127, 208, 255, .45); border-radius: 12px; padding: 10px 12px; color: #dfeefa;
+  font: 600 13px/1.4 system-ui, sans-serif; display: flex; gap: 10px; align-items: center; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
+#coach p { margin: 0; flex: 1; }
+#coach button { flex: none; background: #2a5a7a; color: #fff; border: 0; border-radius: 8px; padding: 6px 10px; font-weight: 700; cursor: pointer; }
+body.fps #coach { display: none; }
+.roster .marWrap { display: flex; flex-direction: column; gap: 6px; }
+.roster .marWrap .mar { width: 100%; }
+.roster .perks { margin: 0 0 0 44px; font-size: 12px; opacity: .8; }
+.roster .perkPick { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 8px; border: 1px dashed rgba(255, 211, 106, .6); border-radius: 10px; }
+.roster .perkPick span { width: 100%; color: #ffd36a; font-weight: 700; font-size: 13px; }
+.roster .perkOpt { flex: 1 1 140px; text-align: left; background: rgba(255, 211, 106, .08); border: 1px solid rgba(255, 211, 106, .4); color: #fff; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
+.roster .perkOpt b { display: block; } .roster .perkOpt small { opacity: .8; }
