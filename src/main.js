@@ -4242,6 +4242,11 @@ function beginPlayerTurn(first = false) {
   showTurnBanner(first ? 'YOUR SQUAD' : 'YOUR TURN', `Turn ${turn.n}`);
   tbSelect(tbMine()[0] || null);
   updateButtons();
+  if (!tbMine().length) { // squad down but ore left: point straight at the way back in
+    radio('The squad is down. Call in reinforcements!', 'warn');
+    const sh = $('tbShop'); if (sh) sh.classList.remove('hidden');
+    $('tbShopBtn') && $('tbShopBtn').classList.add('pulse');
+  } else if ($('tbShopBtn')) $('tbShopBtn').classList.remove('pulse');
 }
 function tbSelect(u) {
   turn.sel = u; turn.pending = null; turn.tool = 'move';

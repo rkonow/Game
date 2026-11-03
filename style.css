@@ -695,3 +695,4 @@ body.touch #fpsActions button kbd { display: none; }
 body.touch #btnAbility  { right: 146px; bottom: 52px; }   /* left of Fire */
 body.touch #btnAbility2 { right: 132px; bottom: 124px; }  /* up and left */
 body.touch #btnUlt      { right: 50px;  bottom: 172px; }  /* above Fire */
+#tbShopBtn.pulse { animation: ultPulse .9s ease-in-out infinite; border-color: #ffd36a; color: #ffd36a; }
