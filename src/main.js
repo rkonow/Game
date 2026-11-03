@@ -2885,8 +2885,8 @@ function updateCamera(dt) {
   const dpitch = fps.pitch - fps.lastPitch;
   fps.lastYaw = fps.yaw; fps.lastPitch = fps.pitch;
   const ks = Math.min(1, dt * 10);
-  fps.swayX += (Math.max(-0.05, Math.min(0.05, dyaw * 0.6)) - fps.swayX) * ks;
-  fps.swayY += (Math.max(-0.05, Math.min(0.05, -dpitch * 0.6)) - fps.swayY) * ks;
+  fps.swayX += (Math.max(-0.03, Math.min(0.03, dyaw * 0.35)) - fps.swayX) * ks;
+  fps.swayY += (Math.max(-0.03, Math.min(0.03, -dpitch * 0.35)) - fps.swayY) * ks;
   const walk = Math.min(1, Math.hypot(fps.vx, fps.vz) / 4);
   const portrait = camera.aspect < 1;
   // aim down sights: slide the sight onto the crosshair; reload: dip and tilt the gun
@@ -2894,7 +2894,7 @@ function updateCamera(dt) {
   fps.ads += ((fps.reloadT > 0 ? 0 : wantAds) - fps.ads) * Math.min(1, dt * 13);
   const kitNow = viewmodel.userData.kit;
   const rl = fps.reloadT > 0 ? Math.sin(Math.min(1, 1 - fps.reloadT / fps.reloadMax) * Math.PI) : 0;
-  const VM = window.__vm || (portrait ? { s: 0.46, x: 0.03, y: -0.135, z: -0.4 } : { s: 0.64, x: 0.12, y: -0.13, z: -0.31 });
+  const VM = window.__vm || (portrait ? { s: 0.62, x: 0.05, y: -0.21, z: -0.36, r: 0.08 } : { s: 0.8, x: 0.12, y: -0.175, z: -0.28, r: 0.07 });
   const vs = VM.s;
   viewmodel.scale.setScalar(vs);
   fps.vmRoll = (fps.vmRoll || 0) * Math.exp(-dt * 12);
@@ -2907,7 +2907,7 @@ function updateCamera(dt) {
   viewmodel.position.x = hipX * (1 - a) + fps.swayX * 0.3 * a;
   viewmodel.position.y = hipY * (1 - a) + (-(kitNow ? kitNow.sightY : 0.1) * vs - fps.vmKick * 0.006) * a - rl * 0.12;
   viewmodel.position.z += -0.04 * a + rl * 0.05;
-  viewmodel.rotation.set(fps.vmKick * (0.18 - 0.1 * a) - rl * 0.7, fps.swayX * 1.5 * (1 - 0.7 * a), -fps.swayX * 2 * (1 - 0.7 * a) + fps.vmRoll + rl * 0.5);
+  viewmodel.rotation.set(fps.vmKick * (0.18 - 0.1 * a) - rl * 0.7, (VM.r || 0) * (1 - a) + fps.swayX * 1.5 * (1 - 0.7 * a), -fps.swayX * 2 * (1 - 0.7 * a) + fps.vmRoll + rl * 0.5);
   fps.flash -= dt;
   if (fps.flash <= 0) viewmodel.userData.flash.visible = false;
   const ch = $('crosshair');
@@ -3718,7 +3718,7 @@ function drawOverlay() {
     if (e.isBase && e.shield) {
       octx.strokeStyle = '#ffa080'; octx.lineWidth = 2; octx.strokeRect(s.x - w / 2 - 3, s.y - 3, w + 6, h + 6);
       octx.fillStyle = '#ffd0c0'; octx.font = '700 11px system-ui';
-      if (!(camp.m && camp.m.story)) octx.fillText(`BIO-SHIELD · hold ${points.length - playerPointCount()} more relay${points.length - playerPointCount() === 1 ? '' : 's'}`, s.x, s.y - 6);
+      if (!camp.m || camp.m.goal.type === 'hive') octx.fillText(`BIO-SHIELD · hold ${points.length - playerPointCount()} more relay${points.length - playerPointCount() === 1 ? '' : 's'}`, s.x, s.y - 6);
     }
     if (e.armorT > 0) { octx.fillStyle = '#7fb8ff'; octx.fillRect(s.x - w / 2, s.y + h + 1, w, 2); }
     if (e.stunT > 0) { octx.font = '14px system-ui'; octx.fillText('💫', s.x, s.y - 6); }

@@ -1,0 +1,6 @@
+node:internal/modules/cjs/loader:1433
+
+Error: Cannot find module '/home/user/Game/pt2.js'
+}
+
+Node.js v22.23.4
