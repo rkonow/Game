@@ -564,3 +564,4 @@ body.xcom #btnEndTurn { background: linear-gradient(180deg, #2f7a4a, #1e5233); }
 #turnBanner.enemy b { color: #ff7a5a; }
 #turnBanner.show { animation: turnBan 1.6s ease-out forwards; }
 @keyframes turnBan { 0% { opacity: 0; transform: translate(-50%, -40%) scale(1.15); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -55%); } }
+body.xcom #btnSwap { display: none !important; }

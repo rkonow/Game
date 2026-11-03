@@ -1750,9 +1750,9 @@ function updateUnit(u, dt) {
   u.invulnT = (u.invulnT || 0) - dt;
   u.slowT = (u.slowT || 0) - dt;
   u.moving = false;
-  if (turn.on && !u.isTower) { turnUnit(u, dt); return; }
+  if (turn.on && !turn.live && !u.isTower) { turnUnit(u, dt); return; }
   // ducks patch themselves up after 4s out of the fight
-  if (u.team === PLAYER && u.hp < u.maxHp && game.time - (u.hurtAt ?? -99) > REGEN_DELAY) u.hp = Math.min(u.maxHp, u.hp + u.maxHp * REGEN_RATE * dt);
+  if (!turn.on && u.team === PLAYER && u.hp < u.maxHp && game.time - (u.hurtAt ?? -99) > REGEN_DELAY) u.hp = Math.min(u.maxHp, u.hp + u.maxHp * REGEN_RATE * dt);
   if (u.isTower) { updateTower(u, dt); return; }
   if (u.possessed) return;
   if (u.stunT > 0) { u.stunT -= dt; return; }
@@ -1786,7 +1786,7 @@ function updateUnit(u, dt) {
       return;
     }
     if (o.auto && d > u.range + 8) { u.order = { type: 'idle' }; return; }
-    if (tac.on && o.type === 'idle') { // in tactics, idle means hold this spot: step out a little to answer fire, never wander
+    if ((tac.on || turn.live) && o.type === 'idle') { // in tactics, idle means hold this spot: step out a little to answer fire, never wander
       if (!u.anchor) u.anchor = { x: u.x, z: u.z };
       if (u.lastHitBy === target && Math.hypot(u.x - u.anchor.x, u.z - u.anchor.z) < 5) { pathTo(u, target.x, target.z); moveAlong(u, dt); fireOnTheMove(u); }
       return;
@@ -1800,7 +1800,7 @@ function updateUnit(u, dt) {
     pathTo(u, o.x, o.z);
     if (moveAlong(u, dt)) u.order = { type: 'idle' };
     fireOnTheMove(u);
-  } else if (tac.on && o.type === 'idle' && u.anchor && Math.hypot(u.x - u.anchor.x, u.z - u.anchor.z) > 0.8) {
+  } else if ((tac.on || turn.live) && o.type === 'idle' && u.anchor && Math.hypot(u.x - u.anchor.x, u.z - u.anchor.z) > 0.8) {
     pathTo(u, u.anchor.x, u.anchor.z); moveAlong(u, dt); // walk back to the held spot
   }
 }
@@ -2190,7 +2190,7 @@ const raycaster = new THREE.Raycaster();
 const tmpV = new THREE.Vector3();
 
 function possess(u) {
-  if (turn.on) return; // the campaign is played from the command view
+  if (turn.on && !turn.live) return; // the campaign is played from the command view, except during a live drop-in
   if (!u || u.dead || u.isBase || u.isTower || u.team !== PLAYER) return;
   if (tac.on) {
     if (tac.phase === 'plan') { tac.hero = u; selection = [u]; updateButtons(); toast(`★ ${nameOf(u)} is your hero this round`, 1.2); return; }
@@ -2237,7 +2237,7 @@ function exitFPS() {
 }
 
 function swapUnit() {
-  if (tac.on) { toast('One hero per round', 1); return; }
+  if (tac.on || turn.on) { toast('One hero per round', 1); return; }
   const mine = playerUnits();
   if (mine.length < 2) { toast('No other marines', 1); return; }
   const i = mine.indexOf(possessed);
@@ -3568,7 +3568,7 @@ function updateHud(dt) {
   if (possessed) {
     const k = Math.max(0, possessed.hp / possessed.maxHp);
     $('fpsHpFill').style.width = `${k * 100}%`;
-    $('fpsHpText').textContent = `${(possessed.callsign || nameOf(possessed)).toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  hero`;
+    $('fpsHpText').textContent = `${(possessed.callsign || nameOf(possessed)).toUpperCase()}  ${Math.ceil(possessed.hp)} / ${possessed.maxHp}  ·  ${turn.live ? `LIVE ${Math.max(0, Math.ceil(turn.liveT))}s` : "hero"}`;
     { // ammo counter
       const kit = viewmodel.userData.kit, el = $('ammo');
       if (kit) {
@@ -3639,7 +3639,7 @@ function simulate(simDt, dt) {
   if (mode === 'fps') updateFPS(dt, simDt);
   for (const e of entities) if (!e.dead && !e.isBase) updateUnit(e, simDt);
   separate();
-  if (!turn.on) updatePoints(simDt);
+  if (!turn.on || turn.live) updatePoints(simDt);
   if (tac.on) updateRound(simDt);
   else if (!turn.on) { updateEnemyOrders(simDt); updateBases(simDt); }
   updateGrenades(simDt);
@@ -3659,7 +3659,7 @@ const TBS = {
   trooper: { move: 8, dmg: [22, 30] }, heavy: { move: 6.5, dmg: [34, 46] }, sniper: { move: 7, dmg: [44, 58] }, elite: { move: 9, dmg: [30, 42] },
 };
 const TB_ALIEN_DMG = 0.62, TB_BASE_DMG = 3; // aliens hit a bit softer; the hive takes triple damage so it can be burned in a few turns
-const turn = { on: false, side: 'player', n: 1, sel: null, busy: false, tool: 'move', pending: null, hover: null, hoverKey: '', cam: null, focusT: 0, focus: new THREE.Vector3(), spawnT: 0 };
+const turn = { live: false, liveT: 0, liveUsed: false, on: false, side: 'player', n: 1, sel: null, busy: false, tool: 'move', pending: null, hover: null, hoverKey: '', cam: null, focusT: 0, focus: new THREE.Vector3(), spawnT: 0 };
 const tbSurvive = st => Math.ceil(st.survive / 12);
 const wait = ms => new Promise(r => setTimeout(r, ms * (window.__tbFast || 1)));
 const tbMine = () => entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower);
@@ -3823,7 +3823,7 @@ async function tbActivate() {
 // ---- player turn
 function beginPlayerTurn(first = false) {
   if (mode === 'over') return;
-  turn.side = 'player'; turn.busy = false; turn.tool = 'move'; turn.pending = null;
+  turn.side = 'player'; turn.busy = false; turn.tool = 'move'; turn.pending = null; turn.liveUsed = false;
   for (const u of tbMine()) { u.ap = 2; u.hunker = false; u.ow = false; }
   showTurnBanner(first ? 'YOUR SQUAD' : 'YOUR TURN', `Turn ${turn.n}`);
   tbSelect(tbMine()[0] || null);
@@ -3913,6 +3913,40 @@ function turnTap(ent, gp, { secondary, touch }) {
   const p = turn.pending;
   if (touch && !(p && p.kind === 'move' && Math.hypot(p.x - gp.x, p.z - gp.z) < 1.2)) { turn.pending = { kind: 'move', x: gp.x, z: gp.z, ...mc }; return; }
   tbAct(async () => { u.ap -= mc.ap; await tbMove(u, gp.x, gp.z, mc.path); });
+}
+// ---- drop in: once per turn, a marine with actions left can be played live in first person for 20 seconds.
+// Everything fights in real time (both sides hold their ground and shoot back), then the battle freezes and the turns resume.
+const LIVE_TIME = 20;
+function tbDropIn() {
+  const u = turn.sel;
+  if (!u || u.dead || u.ap <= 0 || turn.busy || turn.side !== 'player') return;
+  if (turn.liveUsed) { toast('One live drop-in per turn', 1.2); return; }
+  turn.liveUsed = true; turn.busy = true; turn.pending = null; turn.tool = 'move';
+  turn.live = true; turn.liveT = LIVE_TIME; game.relink = 0;
+  for (const e of entities) if (!e.dead && !e.isBase) { e.order = { type: 'idle' }; e.path = null; e.anchor = null; e.ow = false; }
+  possess(u);
+  showTurnBanner('LIVE', `${LIVE_TIME} seconds`);
+  radio(`${u.callsign || nameOf(u)} is live for ${LIVE_TIME} seconds. Make them count.`, 'good');
+}
+function liveTick(dt) {
+  if (!turn.live) return;
+  if (mode === 'over') { turn.live = false; return; }
+  if (mode === 'fps' && !(game.slowmo > 0.5)) turn.liveT -= dt;
+  const tag = $('modeTag'); tag.innerHTML = `<b>LIVE</b> ${Math.max(0, Math.ceil(turn.liveT))}s then back to turns`; tag.className = 'op';
+  if (turn.liveT <= 0 || mode !== 'fps' || !possessed) endLive();
+}
+async function endLive() {
+  if (!turn.live) return;
+  const u = possessed;
+  turn.live = false; game.relink = 0;
+  if (mode === 'fps') exitFPS();
+  for (const e of entities) if (!e.dead && !e.isBase) { e.order = { type: 'idle' }; e.path = null; e.anchor = null; }
+  for (const h of tbFoes()) if (h.hp < h.maxHp || tbMine().some(m => Math.hypot(m.x - h.x, m.z - h.z) < 15)) h.alert = true;
+  if (u && !u.dead) u.ap = 0;
+  if (mode === 'over') return;
+  showTurnBanner('BACK TO TURNS', 'Live time is up');
+  await wait(600);
+  tbAfterAction();
 }
 function tbOverwatch() {
   const u = turn.sel; if (!u || u.ap <= 0 || turn.busy || turn.side !== 'player') return;
@@ -4071,6 +4105,7 @@ function turnTick(dt) {
   const can = turn.side === 'player' && !turn.busy && u && !u.dead && u.ap > 0;
   $('btnOW').classList.toggle('off', !can);
   $('btnHunker').classList.toggle('off', !can);
+  $('btnTLive').classList.toggle('off', !can || turn.liveUsed);
   $('btnTGren').classList.toggle('off', !can || u.type !== 'trooper' || !u.gren);
   $('btnTGren').classList.toggle('armed', turn.tool === 'grenade');
   $('btnEndTurn').classList.toggle('off', turn.side !== 'player' || turn.busy);
@@ -4161,6 +4196,7 @@ function drawTurnUI() {
 }
 canvas.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') turn.hover = { x: e.clientX, y: e.clientY }; });
 tapButton($('btnOW'), tbOverwatch);
+tapButton($('btnTLive'), tbDropIn);
 tapButton($('btnHunker'), tbHunker);
 tapButton($('btnTGren'), tbGrenadeTool);
 tapButton($('btnTNext'), tbNext);
@@ -4169,6 +4205,7 @@ function turnKey(code) {
   if (code === 'Enter' || code === 'Backspace') tbEndTurn();
   else if (code === 'KeyO' || code === 'KeyY') tbOverwatch();
   else if (code === 'KeyH') tbHunker();
+  else if (code === 'KeyF') tbDropIn();
   else if (code === 'KeyG') tbGrenadeTool();
   else if (code === 'Tab' || code === 'KeyN') tbNext();
   else if (code === 'Escape') { turn.pending = null; turn.tool = 'move'; }
@@ -4743,6 +4780,7 @@ function frame(now) {
   if (window.__camOverride) window.__camOverride(camera);
   if (camp.m) campaignTick(dt);
   if (turn.on && mode === 'rts') turnTick(dt);
+  if (turn.on) liveTick(dt);
   if (mode !== 'menu') updateHud(dt); else if (toastTimer > 0) toastTimer -= dt;
   renderFrame(dt);
   drawOverlay();
@@ -4758,5 +4796,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
-  turn, tbEndTurn, turnTap, shotInfo, tbOverwatch, tbGrenadeTool, tbMove, pickSpot, bestShot, tbLOS, coverFrom, alienAct, findPath, boxes, loot, scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
+  turn, tbDropIn, tbEndTurn, turnTap, shotInfo, tbOverwatch, tbGrenadeTool, tbMove, pickSpot, bestShot, tbLOS, coverFrom, alienAct, findPath, boxes, loot, scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
 };

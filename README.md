@@ -47,6 +47,7 @@ One loop: **hold the relays, drop the shield, destroy the hive.**
 - **Alien turn:** aliens sit still until they see you, then the whole pack wakes up and scrambles for cover. On their turn each one moves toward you, looks for cover and flanks, and shoots when the odds are good. Their spitters set up overwatch too.
 - Relays and the story relay are captured by ending turns with a marine on them. Ore buys reinforcements during your turn. Loot left on the ground fades after three turns.
 - The shot camera cuts over the shooter's shoulder for every shot.
+- **Drop in · 20s** (F): once per turn, a marine with actions left can be played **live in first person for 20 seconds**. Everything fights in real time (both sides hold their ground and shoot back, relays capture as in Live battle), then the battle freezes and the turns resume. That marine's turn is used up; **◀ Command** ends it early.
 
 Story missions build their own map (canyon walls, camps) and run a script of objectives. Each checkpoint you reach is saved: if the squad is wiped out you restart from it with the same marines, and nobody is lost on a failed attempt. Ore buys reinforcements, which a dropship drops at your last checkpoint.
 
@@ -91,7 +92,7 @@ Win: hold all 3 relays to drop the hive's bio-shield, then destroy the hive. Los
 | Drop in | **F** or double-click a marine | Double-tap a marine or **Drop in** |
 | First person | WASD, mouse (pointer lock), click or Space to fire | Left stick, drag anywhere on the right to aim, hold **FIRE** (also aims while held); all at once, multitouch |
 | Extras | **Q**/**E** abilities, **X** ultimate, **R** reload, **G** rally, right mouse aim down sights, **C** swap, **F**/**Tab** back | Ability buttons and **★** above FIRE, **Rally squad**, **Swap marine**, **◀ Command** |
-| Campaign turns | Click a marine, click ground to move (hover shows path and cover), click an alien twice to shoot; **O** overwatch, **H** hunker, **G** grenade, **Tab** next marine, **Enter** end turn | Tap a marine, tap a spot or alien once to preview and again to confirm; one finger pans; buttons in the command bar |
+| Campaign turns | Click a marine, click ground to move (hover shows path and cover), click an alien twice to shoot; **F** drop in live for 20s, **O** overwatch, **H** hunker, **G** grenade, **Tab** next marine, **Enter** end turn | Tap a marine, tap a spot or alien once to preview and again to confirm; one finger pans; buttons in the command bar |
 
 ## Graphics
 
