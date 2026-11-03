@@ -668,3 +668,8 @@ body.tbui.tbEnemy:not(.fps) #toast { top: calc(100px + env(safe-area-inset-top))
   body.tbui:not(.fps) #radio { left: calc((100vw - min(300px, 40vw)) / 2); max-width: 50vw; }
   body.tbui.tbMapOpen:not(.fps) #minimap { right: calc(min(300px, 40vw) + 10px); width: 120px; height: 120px; }
 }
+@media (orientation: portrait) {
+  body.tbui:not(.fps) #coach { top: auto; bottom: calc(var(--tbph, 190px) + 8px); font-size: 12px; padding: 8px 10px; }
+  #tbCenter { bottom: calc(var(--tbph, 190px) + 12px); }
+  body.tbui:not(.fps) #coach:not(.hidden) ~ #tb #tbCenter { bottom: calc(var(--tbph, 190px) + 96px); }
+}

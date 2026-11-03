@@ -3976,6 +3976,7 @@ function startTurns() {
   turn.fp = 2;
   tbUISetup();
   startGame();
+  rts.zoom = camera.aspect < 1 ? 24 : innerHeight <= 560 ? 19 : 26; // close enough to see your marines; pinch to zoom
   setTimeout(tutStart, 1500);
   toast(isTouch ? 'Tap a marine, then a spot or an alien' : 'Click a marine, then a spot or an alien', 3.5);
   setTimeout(() => beginPlayerTurn(true), 400);
@@ -4199,7 +4200,7 @@ async function tbAct(fn) {
 }
 function moveCost(u, x, z) {
   if (!isFree(toCell(x), toCell(z))) return null;
-  if (entities.some(e => !e.dead && e !== u && !e.isBase && Math.hypot(e.x - x, e.z - z) < 0.9)) return null;
+  if (entities.some(e => !e.dead && e !== u && !e.isBase && Math.hypot(e.x - x, e.z - z) < (turn.on ? 1.4 : 0.9))) return null; // marines are drawn big on the turn map: keep them from overlapping
   const path = findPath(u.x, u.z, x, z);
   const L = pathLen(u, path), R = moveR(u);
   const ap = L <= R ? 1 : L <= R * 2 && u.ap >= 2 ? 2 : 0;
@@ -4254,7 +4255,15 @@ function turnTap(ent, gp, { secondary, touch }) {
     return;
   }
   if (!gp) return;
-  const mc = moveCost(u, gp.x, gp.z);
+  let mc = moveCost(u, gp.x, gp.z);
+  if (!mc) { // a tap on a rock or right next to someone: use the nearest spot you can stand on
+    let best = null, bd = 2.2;
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+      const x = cellCenter(toCell(gp.x) + dx), z = cellCenter(toCell(gp.z) + dz), d = Math.hypot(x - gp.x, z - gp.z);
+      if (d < bd && moveCost(u, x, z)) { bd = d; best = { x, z }; }
+    }
+    if (best) { gp = { x: best.x, z: best.z }; mc = moveCost(u, gp.x, gp.z); }
+  }
   if (!mc) { toast('Can\'t stand there', 0.8); return; }
   if (!mc.ap) { toast(u.ap >= 2 ? 'Too far, even dashing' : 'Too far for one action', 1); return; }
   const p = turn.pending;
@@ -4573,6 +4582,7 @@ function tbUITick() {
   if (!tbUI.built) return;
   const u = turn.sel, player = turn.side === 'player';
   document.body.classList.toggle('tbEnemy', !player);
+  { const h = $('tbPanel').offsetHeight; if (h !== tbUI.ph) { tbUI.ph = h; document.documentElement.style.setProperty('--tbph', h + 'px'); } }
   // top line
   $('tbObj').textContent = campaignObjective().replace(/<[^>]+>/g, '').replace('🎯 ', '');
   $('tbTurn').textContent = `T${turn.n}`;
@@ -4615,7 +4625,6 @@ function turnTick(dt) {
   turn.visT = (turn.visT || 0) - dt;
   if (turn.visT <= 0) { turn.visT = 0.15; tbVision(); }
   if (turn.focusT > 0) { turn.focusT -= dt; rts.focus.lerp(turn.focus, Math.min(1, dt * 4)); }
-  if (!turn.cam && trans === null && camera.aspect < 1) rts.zoom = Math.max(rts.zoom, 34);
   const tag = $('modeTag');
   tag.innerHTML = (turn.side === 'player' ? `<b>YOUR TURN</b> ${turn.n}` : `<b>ALIEN TURN</b>${turn.fast ? ' ⏩' : ''}`) + ` <span class="fp" title="Focus: earned by kills and crits, spent to drop in">◆ ${turn.fp}</span>`;
   tag.className = turn.side === 'player' ? 'plan' : 'op';
@@ -5420,5 +5429,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
-  dmgNums, raycaster, turn, tbDropIn, tbEndTurn, turnTap, shotInfo, tbOverwatch, tbGrenadeTool, tbMove, pickSpot, bestShot, tbLOS, coverFrom, alienAct, findPath, boxes, loot, scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
+  dmgNums, raycaster, moveCost, pickEntity, groundPoint, turn, tbDropIn, tbEndTurn, turnTap, shotInfo, tbOverwatch, tbGrenadeTool, tbMove, pickSpot, bestShot, tbLOS, coverFrom, alienAct, findPath, boxes, loot, scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
 };
