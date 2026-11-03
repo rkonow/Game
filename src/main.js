@@ -2154,6 +2154,15 @@ function standSpot(x, z, gap = 1.3) {
   const [i, j] = nearestFree(toCell(x), toCell(z)); return [cellCenter(i), cellCenter(j)];
 }
 function spawnPlayer(type) {
+  const u = spawnPlayerAt(type);
+  if (u && camp.m && !u.callsign) { // reinforcements get a name too
+    const used = new Set(entities.map(e => e.callsign));
+    const free = SURNAMES.map(n => `Pvt. ${n}`).filter(n => !used.has(n));
+    u.callsign = free[Math.floor(Math.random() * free.length)] || 'Pvt. Rookie';
+  }
+  return u;
+}
+function spawnPlayerAt(type) {
   if (camp.m && camp.m.story && story.def) { // story maps: a dropship drops reinforcements at your last checkpoint
     const [cx, cz] = story.def[story.checkpoint].cp;
     const u = makeUnit(PLAYER, type, ...standSpot(cx + (Math.random() - 0.5) * 3, cz + (Math.random() - 0.5) * 3));
@@ -2833,6 +2842,7 @@ const dummy = new THREE.PerspectiveCamera(); // camera so lookAt faces -Z
 // on the turn map the panel covers part of the screen: shift the projection so the camera's centre
 // sits in the middle of the map you can actually see (taps and labels follow automatically)
 let panelEl = null, panelT = 0, panelOff = [0, 0];
+const edgeArrows = [];
 function panelViewOffset() {
   const on = turn.on && mode === 'rts' && !turn.cam && document.body.classList.contains('tbui');
   if (on && --panelT <= 0) {
@@ -4783,6 +4793,9 @@ function drawTurnUI() {
       let x = q.x, y = q.y;
       if (q.behind) { x = innerWidth - x; y = bot; }
       x = Math.max(22, Math.min(rightB - 22, x)); y = Math.max(top + 14, Math.min(bot - 14, y));
+      const near = edgeArrows.find(a => Math.hypot(a.x - x, a.y - y) < 40); // aliens off the same edge share one arrow
+      if (near) { near.n++; continue; }
+      edgeArrows.push({ x, y, n: 1 });
       const ang = Math.atan2(q.y - y, q.x - x) || (q.behind ? Math.PI / 2 : 0);
       octx.save(); octx.translate(x, y); octx.rotate(ang);
       octx.fillStyle = 'rgba(40,14,6,.85)'; octx.strokeStyle = '#ff8a3d'; octx.lineWidth = 2.5;
@@ -4790,6 +4803,11 @@ function drawTurnUI() {
       octx.restore();
     }
   }
+  for (const a of edgeArrows) if (a.n > 1) {
+    octx.font = '900 11px system-ui'; octx.fillStyle = '#ff8a3d'; octx.beginPath(); octx.arc(a.x + 10, a.y - 10, 8, 0, Math.PI * 2); octx.fill();
+    octx.fillStyle = '#1a0a04'; octx.textAlign = 'center'; octx.fillText(a.n, a.x + 10, a.y - 6);
+  }
+  edgeArrows.length = 0;
   for (const h of tbFoes()) { // name the special aliens so you learn what they do
     if (hiddenFoe(h) || !['burrower', 'shielder', 'eggsac', 'elite'].includes(h.type)) continue;
     const s = toScreen(h.x, h.type === 'elite' ? 3.4 : 2.2, h.z); if (s.behind) continue;
