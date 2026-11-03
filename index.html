@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f16">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Hivefall</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="inMenu">
+<canvas id="game"></canvas>
+<canvas id="overlay"></canvas>
+
+<div id="freeze"><span>⏸ TACTICAL PAUSE · PLAN YOUR TURN</span></div>
+<div id="hud">
+  <div id="topbar">
+    <div id="status"></div>
+    <div id="meters">
+      <span id="modeTag"></span>
+      <span id="cpText" title="Ore: earned over time, faster for each relay you hold">💠 0</span>
+    </div>
+  </div>
+  <div id="radio"></div>
+  <canvas id="minimap" width="150" height="150"></canvas>
+  <div id="toast"></div>
+  <div id="turnBanner"></div>
+  <div id="coach" class="hidden"></div>
+
+  <!-- command panel: who is selected, what they can do, what you can buy -->
+  <div id="cmdPanel">
+    <div id="unitCard">
+      <div id="selInfo">No marines selected</div>
+      <div id="portraits"></div>
+    </div>
+    <div id="rtsBar" class="cmdgrid">
+      <button id="btnAll" title="Select all army (Q)"><i>👥</i><span>All</span><kbd>Q</kbd></button>
+      <button id="btnHold" class="tac-only" title="Stay put and shoot what comes into range (H)"><i>✋</i><span>Hold</span><kbd>H</kbd></button>
+      <button id="btnBomb" class="tac-only" title="Marines throw a frag grenade at a spot (B)"><i>💣</i><span>Grenade</span><kbd>B</kbd></button>
+      <button id="btnUpgrade" class="tac-only" title="Upgrade the selected marines and turrets, up to ★3 (U)"><i>⬆</i><span>Upgrade</span><kbd>U</kbd></button>
+      <button id="btnHero" class="tac-only" title="Play this marine in first person during the round (F)"><i>★</i><span>Hero</span><kbd>F</kbd></button>
+      <button id="btnAMove" class="live-only" title="Attack-move: next click/tap (X)"><i>⚔</i><span>Attack</span><kbd>X</kbd></button>
+      <button id="btnPossess" class="accent" title="Take control of a selected marine (F)"><i>🎯</i><span>Drop in</span><kbd>F</kbd></button>
+      <button id="btnGo" class="tac-only go" title="Start the round (Space / Enter)"><i>▶</i><span>Go · 20s</span><kbd>␣</kbd></button>
+      <button id="btnTLive" class="xc-only accent" title="Drop in: play this marine live in first person for 20 seconds, then back to turns (F)"><i>🎯</i><span>Drop in · 20s</span><kbd>F</kbd></button>
+      <button id="btnOW" class="xc-only" title="Overwatch: shoot the first alien that moves in range during their turn (O)"><i>👁</i><span>Overwatch</span><kbd>O</kbd></button>
+      <button id="btnHunker" class="xc-only" title="Hunker down: much harder to hit until your next turn (H)"><i>🛡</i><span>Hunker</span><kbd>H</kbd></button>
+      <button id="btnTGren" class="xc-only" title="Class ability: Marine frag grenade, Juggernaut shield wall, Ranger aimed shot (G)"><i>💣</i><span>Grenade</span><kbd>G</kbd></button>
+      <button id="btnTNext" class="xc-only" title="Next marine with actions left (Tab)"><i>⏭</i><span>Next</span><kbd>⇥</kbd></button>
+      <button id="btnFast" class="xc-only" title="Fast alien turns (Space)"><i>⏩</i><span>Fast</span><kbd>␣</kbd></button>
+      <button id="btnEndTurn" class="xc-only go" title="End your turn: the swarm moves (Enter)"><i>⏎</i><span>End turn</span><kbd>↵</kbd></button>
+    </div>
+    <div id="powers" class="tray">
+      <button id="btnBuyTrooper" title="Deploy a marine: rifle, frag grenade (1)"><i>🪖</i><span>Marine</span><small>20</small><kbd>1</kbd></button>
+      <button id="btnBuyHeavy" title="Deploy a juggernaut: heavy armor, energy wall (2)"><i>🛡️</i><span>Juggernaut</span><small>35</small><kbd>2</kbd></button>
+      <button id="btnBuySniper" title="Deploy a ranger: long range, scope (3)"><i>🎯</i><span>Ranger</span><small>30</small><kbd>3</kbd></button>
+      <button id="btnBuy_turret" class="tac-only" title="Build an autoturret: shoots aliens in range (4)"><i>🔫</i><span>Turret</span><small>40</small><kbd>4</kbd></button>
+      <button id="btnBuy_mortar" class="tac-only" title="Build a mortar: long-range splash (5)"><i>💥</i><span>Mortar</span><small>55</small><kbd>5</kbd></button>
+      <button id="btnBuy_scarecrow" class="tac-only" title="Build a stasis pylon: slows aliens around it (6)"><i>🌀</i><span>Stasis</span><small>25</small><kbd>6</kbd></button>
+    </div>
+  </div>
+
+  <!-- turn-based campaign UI (phone first): one top line, squad bar, actions for the selected marine -->
+  <div id="tb">
+    <div id="tbTop"><span id="tbObj"></span><span id="tbTurn"></span><span id="tbFp" title="Focus: earned by kills and crits, spent to drop in"></span><span id="tbOre" title="Ore: buys reinforcements"></span><button id="tbMap" aria-label="Show the map" title="Map (M)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"/></svg></button></div>
+    <div id="tbStrip"><span>ALIEN TURN</span><small id="tbStripN"></small></div>
+    <button id="tbCenter" aria-label="Center on squad" title="Center on squad (C)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg></button>
+    <div id="tbPanel">
+      <div id="tbConfirm" class="hidden"><div><b id="tbCfTitle"></b><small id="tbCfInfo"></small></div><div class="row"><button id="tbCfNo">Cancel</button><button id="tbCfYes">Confirm</button></div></div>
+      <div id="tbSquad"></div>
+      <div id="tbActs"></div>
+      <div id="tbRow"><button id="tbShopBtn">+ Reinforce</button></div>
+      <div id="tbShop" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- FPS controls -->
+  <div id="fpsUI">
+    <div id="scope"></div>
+    <div id="crosshair"></div>
+    <div id="vignette"></div>
+    <div id="fpsTop" class="bar">
+      <button id="btnExit" title="Back to command view (F / Tab)">◀ Command</button>
+      <button id="btnSwap" title="Jump into the next marine (C)">Swap marine</button>
+      <button id="btnRally" title="Send nearby marines where you aim (G)">Rally squad</button>
+    </div>
+    <div id="fpsHp"><div id="fpsHpFill"></div><span id="fpsHpText"></span></div>
+    <div id="ammo"><b id="ammoN">32</b><small id="ammoMax">/ 32</small><i id="ammoBar"></i></div>
+    <div id="fpsActions" class="bar">
+      <button id="btnUlt" title="Ultimate: charges as you deal damage and hold relays (X)">★ 0%</button>
+      <button id="btnAbility2" title="Ability 2 (E, or right click)">Ability 2</button>
+      <button id="btnAbility" title="Ability 1 (Q)">Ability</button>
+    </div>
+    <div id="lockHint">Click to aim · Esc frees the mouse</div>
+    <div id="stick" class="touch-only"><div id="knob"></div></div>
+    <button id="btnFire" class="touch-only">FIRE</button>
+  </div>
+</div>
+
+<div id="menu" class="screen title">
+  <div class="titleWrap">
+    <div class="logo">
+      <span class="pre">Kepler colony · 2291</span>
+      <h1>HIVE<em>FALL</em></h1>
+      <p class="tag">Command the squad. Drop into the fight.</p>
+    </div>
+    <nav class="mainNav">
+      <button id="btnCamp" class="nav primary"><b>Campaign</b><small>Turn-based story missions · your squad remembers</small></button>
+      <button id="btnStart" class="nav"><b>Live battle</b><small>Real-time skirmish against the swarm</small></button>
+      <button id="btnStartTac" class="nav"><b>Tactics</b><small>Plan, then 20-second live rounds</small></button>
+      <button id="btnHow" class="nav small"><b>How to play</b></button>
+      <div class="navRow">
+        <button id="btnGfx" class="gfx" title="Fancy adds glow and colour grading. Fast is smoother on older phones.">✨ Graphics: fancy</button>
+        <button id="btnMusic" class="gfx">♪ Music: on</button>
+      </div>
+    </nav>
+  </div>
+  <div class="ver">Prototype · original art and music, made in the browser</div>
+</div>
+
+<div id="how" class="screen hidden">
+  <div class="card">
+    <h1>HOW TO PLAY</h1>
+    <p class="lead">The swarm's hive hides behind a bio-shield. Hold the three relays <b>A B C</b> in the middle to bring it down, then destroy the hive. <b>Only a marine you control in first person can capture a relay.</b></p>
+    <div class="cols">
+      <div>
+        <h3>Commander (top view)</h3>
+        <ul>
+          <li>Move your squad to guard the relays. Drag from a marine to where it should go</li>
+          <li>Spend 💠 ore to deploy a <b>Marine</b>, <b>Juggernaut</b> or <b>Ranger</b>. Every relay you hold pays more ore</li>
+          <li class="desk">Desktop: click / drag to select, <b>right click</b> to move or attack, <b>1 2 3</b> deploy, <b>F</b> or double-click to drop in</li>
+          <li>Touch: tap / drag to select, tap ground to move, two fingers pan and zoom, double-tap to drop in</li>
+        </ul>
+      </div>
+      <div>
+        <h3>First person</h3>
+        <ul>
+          <li>Stand on a relay to capture it · you deal <b>x2 damage</b></li>
+          <li class="desk">Desktop: <b>WASD</b> + mouse, click to fire, <b>Q</b>/<b>E</b> abilities, <b>X</b> ultimate, right mouse aims, <b>R</b> reload, <b>G</b> rally, <b>C</b> swap, <b>F</b>/<b>Tab</b> back</li>
+          <li>Touch: left stick, drag right side to aim, hold <b>FIRE</b></li>
+          <li>If your marine goes down, wait 5s to drop in again</li>
+        </ul>
+      </div>
+    </div>
+    <p class="roles"><b>Campaign is turn-based:</b> each marine gets 2 actions (move, dash, shoot, overwatch, hunker, grenade). Once per turn you can <b>Drop in</b> and play one marine live in first person for 20 seconds, then it's back to turns. Cover on the shooter's side lowers the hit chance; flank aliens to crit them. Then the swarm takes its turn. Dead aliens drop loot: ore, medkits, ult cells and rare relics your marine keeps.</p>
+    <p class="roles">Marine: frag grenade, combat roll, ★ drone swarm · Juggernaut: energy wall, shield charge, ★ shockwave · Ranger: scope, jump jet, ★ recon scan · Watch out for the <b>Hive Tyrant</b> · Alerts have a <b>Drop in</b> button that takes you straight there</p>
+    <button id="btnHowBack" class="accent big">Back</button>
+  </div>
+</div>
+
+<div id="twist"></div>
+
+<div id="camp" class="screen hidden">
+  <div class="card campCard">
+    <h1>KEPLER SECTOR</h1>
+    <p class="sub">Campaign · pick a mission and your squad</p>
+    <div id="campMap"></div>
+    <div id="campBrief"></div>
+    <div class="campBtns">
+      <button id="btnLaunch" class="accent big">Launch mission</button>
+      <button id="btnCampBack" class="gfx">◀ Menu</button>
+      <button id="btnCampReset" class="gfx">New campaign</button>
+    </div>
+  </div>
+</div>
+
+<div id="over" class="screen hidden">
+  <div class="card">
+    <h1 id="overTitle"></h1>
+    <p id="overText"></p>
+    <div id="overDebrief"></div>
+    <button id="btnRestart" class="accent big">Play again</button>
+    <button id="btnRetryCp" class="accent big hidden">Retry from checkpoint</button>
+    <button id="btnToMap" class="accent big hidden">Sector map</button>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
