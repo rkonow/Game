@@ -62,6 +62,20 @@
     </div>
   </div>
 
+  <!-- turn-based campaign UI (phone first): one top line, squad bar, actions for the selected marine -->
+  <div id="tb">
+    <div id="tbTop"><span id="tbObj"></span><span id="tbTurn"></span><span id="tbFp" title="Focus: earned by kills and crits, spent to drop in"></span><span id="tbOre" title="Ore: buys reinforcements"></span><button id="tbMap" aria-label="Show the map" title="Map (M)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"/></svg></button></div>
+    <div id="tbStrip"><span>ALIEN TURN</span><small id="tbStripN"></small></div>
+    <button id="tbCenter" aria-label="Center on squad" title="Center on squad (C)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg></button>
+    <div id="tbPanel">
+      <div id="tbConfirm" class="hidden"><div><b id="tbCfTitle"></b><small id="tbCfInfo"></small></div><div class="row"><button id="tbCfNo">Cancel</button><button id="tbCfYes">Confirm</button></div></div>
+      <div id="tbSquad"></div>
+      <div id="tbActs"></div>
+      <div id="tbRow"><button id="tbShopBtn">+ Reinforce</button></div>
+      <div id="tbShop" class="hidden"></div>
+    </div>
+  </div>
+
   <!-- FPS controls -->
   <div id="fpsUI">
     <div id="scope"></div>

@@ -112,7 +112,7 @@ An original, dark cinematic score synthesized live with WebAudio (no audio files
 
 Guns in first person have aim down sights (right mouse; the Ranger keeps its scope), magazines and reloads (**R**), recoil, brass, a muzzle light and layered gunshots.
 Each class has its own gun: the Marine fires a 3-round pulse rifle, the Heavy a pump shotgun, the Ranger a rail rifle and the elite an auto rifle. Every gun has precision hits: shoot an alien's head, eyes or horns for bigger yellow damage numbers and a bright ping. Recoil climbs straight up and settles fast, near misses bend onto the body (more on touch), and the last alien you hit shows a health bar that drains in two steps.
-On the turn-based map your marines are drawn twice as big so you can find them on a phone.
+On the turn-based map your marines are drawn twice as big (aliens 1.5x, on red discs with health bars) so you can find them on a phone. The turn screen has one top line (objective, turn, Focus, ore, map button), a squad bar (tap a marine to select it and center the camera; it shows health, actions left, overwatch and hunker), big buttons for the selected marine, End turn with how many marines can still act, and Reinforce. On a phone a move or shot opens a Confirm card with the cost, cover and hit chance. Off-screen aliens show as arrows at the screen edge, and aliens that slip out of sight leave a "?" where they were last seen.
 
 ## Code map
 

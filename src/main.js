@@ -816,10 +816,11 @@ function buildAlien(u, g, type) {
   }
 }
 
+let uidSeq = 0;
 function makeUnit(team, type, x, z) {
   const t = TYPES[type];
   const u = {
-    kind: 'unit', type, team, x, z, hp: t.hp * (team === PLAYER ? PLAYER_HP : 1), maxHp: t.hp * (team === PLAYER ? PLAYER_HP : 1), speed: t.speed, range: t.range,
+    kind: 'unit', uid: ++uidSeq, type, team, x, z, hp: t.hp * (team === PLAYER ? PLAYER_HP : 1), maxHp: t.hp * (team === PLAYER ? PLAYER_HP : 1), speed: t.speed, range: t.range,
     dmg: t.dmg, rate: t.rate, radius: t.radius, acc: t.acc,
     facing: team === PLAYER ? 0 : Math.PI, cool: Math.random() * t.rate, abilityCd: 0, armorT: 0,
     order: { type: 'idle' }, path: null, pathGoal: null, possessed: false, dead: false, flash: 0,
@@ -2751,6 +2752,9 @@ function pickEntity(sx, sy) {
   const tol = isTouch ? 38 : 26;
   for (const e of entities) {
     if (e.dead || hiddenFoe(e)) continue;
+    if (turn.on && e.team === PLAYER && turn.sel && turn.sel.ap > 0) { // don't steal a move order aimed right next to a marine
+      const s = toScreen(e.x, 0.9 * (e.big || 1), e.z); if (Math.hypot(s.x - sx, s.y - sy) > 20) continue;
+    }
     const s = toScreen(e.x, e.isBase ? 1.6 : 0.8 * (e.big || 1), e.z);
     if (s.behind) continue;
     const d = Math.hypot(s.x - sx, s.y - sy) - (e.isBase ? 45 : 0);
@@ -3792,12 +3796,13 @@ function bark(u, kind) {
 const tbMine = () => entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower);
 const tbFoes = () => entities.filter(e => !e.dead && e.team === ENEMY && !e.isBase);
 
-const TB_MARINE_SCALE = 2;
+const TB_MARINE_SCALE = 2, TB_ALIEN_SCALE = 1.5;
 function startTurns() {
   turn.on = true; turn.n = 1; turn.side = 'player';
   document.body.classList.add('xcom');
   for (const u of tbMine()) { u.ap = 2; u.gren = u.type === 'trooper' ? 1 + (hasPerk(u, 'grenade') ? 1 : 0) : 0; }
   turn.fp = 2;
+  tbUISetup();
   startGame();
   setTimeout(tutStart, 1500);
   toast(isTouch ? 'Tap a marine, then a spot or an alien' : 'Click a marine, then a spot or an alien', 3.5);
@@ -4034,7 +4039,7 @@ function turnTap(ent, gp, { secondary, touch }) {
   if (turn.side !== 'player' || turn.busy) { if (turn.side !== 'player') toast('Alien turn', 0.8); return; }
   if (secondary) { turn.pending = null; turn.tool = 'move'; return; }
   if (!ent && gp) { // a tap near an alien counts as tapping the alien
-    let best = null, bd = 1.4;
+    let best = null, bd = 2.0;
     for (const h of tbFoes()) { if (hiddenFoe(h)) continue; const d = Math.hypot(h.x - gp.x, h.z - gp.z); if (d < bd) { bd = d; best = h; } }
     ent = best;
   }
@@ -4145,7 +4150,7 @@ function tbGrenadeTool() {
   }
   if (!u.gren) { toast('No grenades left', 1); return; }
   turn.tool = turn.tool === 'grenade' ? 'move' : 'grenade'; turn.pending = null;
-  if (turn.tool === 'grenade') toast(isTouch ? 'Tap where it lands, tap again to throw' : 'Click where it lands', 1.4);
+  if (turn.tool === 'grenade') toast(isTouch ? 'Tap where it lands, then Throw' : 'Click where it lands', 1.4);
 }
 
 // ---- alien turn
@@ -4324,6 +4329,113 @@ function showTurnBanner(title, sub) {
   b.className = turn.side === 'enemy' ? 'enemy' : '';
   void b.offsetWidth; b.classList.add('show');
 }
+
+// ---- phone-first turn UI: a squad bar, big buttons for the selected marine, a confirm card instead of "tap again",
+// a one-line top bar and an alien-turn strip. Built once when the turn-based mission starts (missions load a fresh page).
+const TB_ICON = {
+  ow: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  hunker: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
+  live: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  trooper: '<circle cx="12" cy="14" r="7"/><path d="M12 7V3M9 3h6M17 9l2-2"/>',
+  heavy: '<path d="M4 4h16v9c0 4-4 7-8 8-4-1-8-4-8-8z"/><path d="M8 9h8M8 13h8"/>',
+  sniper: '<circle cx="12" cy="12" r="8"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
+  end: '<path d="M5 12h11M12 6l6 6-6 6"/>',
+  fast: '<path d="M4 5l8 7-8 7zM12 5l8 7-8 7z"/>',
+};
+const tbSvg = k => `<svg viewBox="0 0 24 24" aria-hidden="true">${TB_ICON[k]}</svg>`;
+const TB_CLASS = { trooper: 'MAR', heavy: 'JUG', sniper: 'RNG', elite: 'HERO' };
+const tbUI = { built: false, sig: '', abil: '' };
+function tbUISetup() {
+  if (tbUI.built) return; tbUI.built = true;
+  const acts = $('tbActs');
+  for (const [id, ic] of [['btnTGren', null], ['btnOW', 'ow'], ['btnHunker', 'hunker'], ['btnTLive', 'live']]) {
+    const b = $(id); acts.appendChild(b);
+    const i = b.querySelector('i'); if (i && ic) i.innerHTML = tbSvg(ic);
+  }
+  setLabel('btnOW', 'Overwatch'); setLabel('btnHunker', 'Hunker');
+  const end = $('btnEndTurn'); $('tbRow').appendChild(end); end.querySelector('i').innerHTML = tbSvg('end');
+  const fast = $('btnFast'); $('tbStrip').appendChild(fast); fast.querySelector('i').innerHTML = tbSvg('fast'); setLabel('btnFast', 'Fast');
+  for (const id of ['btnBuyTrooper', 'btnBuyHeavy', 'btnBuySniper']) $('tbShop').appendChild($(id));
+  tapButton($('tbShopBtn'), () => $('tbShop').classList.toggle('hidden'));
+  tapButton($('tbMap'), () => document.body.classList.toggle('tbMapOpen'));
+  tapButton($('tbCenter'), tbCenterSquad);
+  tapButton($('tbCfNo'), () => { turn.pending = null; });
+  tapButton($('tbCfYes'), tbConfirm);
+  $('tbSquad').addEventListener('pointerdown', e => {
+    const c = e.target.closest('[data-uid]'); if (!c) return;
+    e.preventDefault(); e.stopPropagation();
+    const u = tbMine().find(m => m.uid === +c.dataset.uid); if (!u) return;
+    if (turn.side === 'player' && !turn.busy) tbSelect(u); else focusOn(u.x, u.z);
+  });
+  document.body.classList.add('tbui');
+}
+function tbCenterSquad() {
+  const mine = tbMine(); if (!mine.length) return;
+  const u = turn.sel && !turn.sel.dead ? turn.sel : null;
+  if (u) { focusOn(u.x, u.z); return; }
+  focusOn(mine.reduce((a, m) => a + m.x, 0) / mine.length, mine.reduce((a, m) => a + m.z, 0) / mine.length);
+}
+// the confirm card does what a second tap on the same spot used to do
+function tbConfirm() {
+  const p = turn.pending; if (!p) return;
+  if (p.kind === 'shot') turnTap(p.t, null, { touch: true });
+  else turnTap(null, { x: p.x, z: p.z }, { touch: true });
+}
+function tbPendingText(p, u) {
+  if (p.kind === 'shot') {
+    const i = p.info, dmg = TBS[u.type] || TBS.trooper, k = u.dmg / TYPES[u.type].dmg * (p.t.isBase ? TB_BASE_DMG : 1);
+    const cov = i.cover === 2 ? 'Full cover' : i.cover === 1 ? 'Half cover' : 'Flanked: easy crit';
+    return { title: `${p.aimed ? 'Aimed shot' : 'Fire'} · ${i.chance}% hit`, info: `${Math.round(dmg.dmg[0] * k)}-${Math.round(dmg.dmg[1] * k)} dmg · ${i.crit}% crit · ${p.t.isBase ? 'the hive' : cov}`, yes: 'Fire', hot: true };
+  }
+  if (p.kind === 'gren') {
+    const n = tbFoes().filter(h => Math.hypot(h.x - p.x, h.z - p.z) < 3.4).length;
+    return { title: 'Throw frag', info: `${n} alien${n === 1 ? '' : 's'} in the blast · ends the turn`, yes: 'Throw', hot: true };
+  }
+  const cov = coverAtSpot(p.x, p.z);
+  return { title: `${p.ap === 2 ? 'Dash' : 'Move'} · ${p.ap} action${p.ap > 1 ? 's' : ''}`, info: cov === 2 ? 'Full cover there' : cov === 1 ? 'Half cover there' : 'No cover there', yes: p.ap === 2 ? 'Dash' : 'Move', hot: false };
+}
+function tbUITick() {
+  if (!tbUI.built) return;
+  const u = turn.sel, player = turn.side === 'player';
+  document.body.classList.toggle('tbEnemy', !player);
+  // top line
+  $('tbObj').textContent = campaignObjective().replace(/<[^>]+>/g, '').replace('🎯 ', '');
+  $('tbTurn').textContent = `T${turn.n}`;
+  $('tbFp').textContent = `◆ ${turn.fp}`;
+  $('tbOre').textContent = `◇ ${Math.floor(game.cp)}`;
+  const moving = tbFoes().filter(h => !hiddenFoe(h)).length;
+  $('tbStripN').textContent = moving ? ` · ${moving} in sight` : '';
+  // End turn says how many marines still have actions
+  const left = tbMine().filter(m => m.ap > 0).length;
+  setLabel('btnEndTurn', left ? `End turn · ${left} can act` : 'End turn');
+  // confirm card
+  const p = player && !turn.busy && u && !u.dead ? turn.pending : null;
+  const cf = $('tbConfirm');
+  cf.classList.toggle('hidden', !p || !isTouch);
+  if (p && isTouch) {
+    const t = tbPendingText(p, u);
+    $('tbCfTitle').textContent = t.title; $('tbCfInfo').textContent = t.info;
+    $('tbCfYes').textContent = t.yes; cf.classList.toggle('hot', t.hot);
+  }
+  // squad bar: rebuild only when something on it changed
+  const mine = tbMine();
+  const sig = mine.map(m => [m.uid, Math.ceil(m.hp), m.ap, m.ow ? 1 : 0, m.hunker ? 1 : 0, m === u ? 1 : 0].join(',')).join('|') + player;
+  if (sig !== tbUI.sig) {
+    tbUI.sig = sig;
+    $('tbSquad').innerHTML = mine.map(m => {
+      const hp = Math.max(0, m.hp / m.maxHp), col = hp > 0.6 ? '#5dd88a' : hp > 0.3 ? '#ffc24a' : '#ff6a5a';
+      const st = m.ow ? 'OW' : m.hunker ? 'HNK' : '';
+      const nm = (m.callsign || nameOf(m)).split(' ').pop();
+      const done = player && m.ap <= 0;
+      return `<button data-uid="${m.uid}" class="${m === u ? 'sel' : ''}${done ? ' done' : ''}" aria-label="${nm}, ${m.ap} actions left">` +
+        `<span class="t"><b>${TB_CLASS[m.type] || ''}</b><em>${st}</em></span><span class="n">${nm}</span>` +
+        `<span class="hp"><span style="width:${Math.round(hp * 100)}%;background:${col}"></span></span>` +
+        `<span class="ap">${player ? '<i class="on"></i>'.repeat(Math.max(0, m.ap)) + '<i></i>'.repeat(Math.max(0, 2 - m.ap)) : ''}</span></button>`;
+    }).join('');
+  }
+  // the class ability button shows its own icon
+  if (u && tbUI.abil !== u.type) { tbUI.abil = u.type; const i = $('btnTGren').querySelector('i'); if (i) i.innerHTML = tbSvg(TB_ICON[u.type] ? u.type : 'trooper'); }
+}
 function turnTick(dt) {
   turn.visT = (turn.visT || 0) - dt;
   if (turn.visT <= 0) { turn.visT = 0.15; tbVision(); }
@@ -4344,7 +4456,7 @@ function turnTick(dt) {
   $('btnEndTurn').classList.toggle('off', turn.side !== 'player' || turn.busy);
   $('btnFast').classList.toggle('armed', turn.fast);
   if (u) setLabel('btnTGren', u.type === 'trooper' ? `Grenade · ${u.gren || 0}` : cd > 0 ? `${ABIL[u.type].name} · ${cd}` : ABIL[u.type].name);
-  const ic = $('btnTGren').querySelector('i'); if (ic && u) ic.textContent = u.type === 'trooper' ? '💣' : u.type === 'heavy' ? '🛡' : '🎯';
+  tbUITick();
   for (const h of tbFoes()) if (h.bubble) h.bubble.visible = h.shieldHP > 0;
   if (u && !u.dead) $('selInfo').textContent = `${u.callsign || nameOf(u)} · ${'●'.repeat(Math.max(0, u.ap))}${'○'.repeat(Math.max(0, 2 - u.ap))} · ${Math.ceil(u.hp)}/${u.maxHp} hp`;
   else if (turn.side === 'enemy') $('selInfo').textContent = 'The swarm is moving…';
@@ -4355,13 +4467,63 @@ function drawTurnUI() {
   if (mode !== 'rts' || turn.cam) return;
   const u = turn.sel;
   const proj = (x, z) => toScreen(x, 0.1, z);
-  // every marine: action point pips, overwatch and hunker icons
+  // every marine stands on a blue team disc (grey and dashed once it is done this turn); the selected one gets a gold
+  // ring, an arrow and its name. Overwatch and hunker show as small chips over the head.
   octx.textAlign = 'center';
   for (const m of tbMine()) {
-    const s = toScreen(m.x, 2.45 + 1.9 * ((m.big || 1) - 1), m.z); if (s.behind) continue;
-    octx.font = '900 12px system-ui'; octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.7)';
-    const tag = (m.ow ? '👁 ' : '') + (m.hunker ? '🛡 ' : '') + (turn.side === 'player' ? '●'.repeat(Math.max(0, m.ap)) + '○'.repeat(Math.max(0, 2 - m.ap)) : '');
-    octx.strokeText(tag, s.x, s.y); octx.fillStyle = m === u ? '#9dffc4' : '#cfe8ff'; octx.fillText(tag, s.x, s.y);
+    const r = 0.45 * (m.big || 1), done = turn.side === 'player' && m.ap <= 0;
+    groundCircle(m.x, m.z, r, 28);
+    if (done) { octx.setLineDash([5, 4]); octx.strokeStyle = 'rgba(160,176,195,.8)'; octx.lineWidth = 2.5; octx.stroke(); octx.setLineDash([]); }
+    else { octx.fillStyle = 'rgba(74,168,255,.22)'; octx.fill(); octx.strokeStyle = '#4aa8ff'; octx.lineWidth = 3; octx.stroke(); }
+    if (m === u) {
+      groundCircle(m.x, m.z, r + 0.3, 32); octx.save(); octx.shadowColor = 'rgba(255,211,106,.9)'; octx.shadowBlur = 12;
+      octx.strokeStyle = '#ffd36a'; octx.lineWidth = 4; octx.stroke(); octx.restore();
+    }
+    const s = toScreen(m.x, 2.3 + 1.9 * ((m.big || 1) - 1), m.z); if (s.behind) continue;
+    if (m === u) {
+      octx.fillStyle = '#ffd36a'; octx.strokeStyle = '#0b1119'; octx.lineWidth = 2;
+      octx.beginPath(); octx.moveTo(s.x - 10, s.y - 18); octx.lineTo(s.x + 10, s.y - 18); octx.lineTo(s.x, s.y - 2); octx.closePath(); octx.fill(); octx.stroke();
+      const nm = `${(m.callsign || nameOf(m)).split(' ').pop().toUpperCase()} · ${'●'.repeat(Math.max(0, m.ap))}${'○'.repeat(Math.max(0, 2 - m.ap))}`;
+      octx.font = '800 12px system-ui'; const w = octx.measureText(nm).width + 14;
+      octx.beginPath(); octx.roundRect ? octx.roundRect(s.x - w / 2, s.y - 42, w, 20, 6) : octx.rect(s.x - w / 2, s.y - 42, w, 20); octx.fill();
+      octx.fillStyle = '#0b1119'; octx.fillText(nm, s.x, s.y - 28);
+    }
+    const chips = (m.ow ? 'OW ' : '') + (m.hunker ? 'HNK' : '');
+    if (chips) { octx.font = '900 11px system-ui'; octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.75)'; const y = s.y + (m === u ? -48 : -4); octx.strokeText(chips.trim(), s.x, y); octx.fillStyle = '#ffd36a'; octx.fillText(chips.trim(), s.x, y); }
+  }
+  // aliens you have seen: an arrow at the screen edge when they are off screen, a "last seen" marker when they vanish
+  {
+    const top = 52, bot = innerHeight - (($('tbPanel') && $('tbPanel').offsetHeight) || 0) - 8;
+    for (const h of tbFoes()) {
+      if (hiddenFoe(h)) {
+        if (!h.lastSeen) continue;
+        const q = toScreen(h.lastSeen.x, 0.6, h.lastSeen.z); if (q.behind) continue;
+        octx.setLineDash([4, 4]); octx.strokeStyle = 'rgba(255,138,61,.75)'; octx.lineWidth = 2;
+        octx.beginPath(); octx.arc(q.x, q.y, 14, 0, Math.PI * 2); octx.stroke(); octx.setLineDash([]);
+        octx.font = '900 13px system-ui'; octx.fillStyle = '#ffb27a'; octx.fillText('?', q.x, q.y + 5);
+        continue;
+      }
+      h.lastSeen = { x: h.x, z: h.z };
+      if (h.type !== 'eggsac') { // a red disc under every alien you can see, and its health
+        groundCircle(h.x, h.z, 0.55 * (h.big || 1) * (h.elite ? 1.3 : 1), 24);
+        octx.fillStyle = 'rgba(255,90,60,.2)'; octx.fill(); octx.strokeStyle = '#ff6a4a'; octx.lineWidth = 2.5; octx.stroke();
+      }
+      { const hb = toScreen(h.x, 1.25 * (h.big || 1) * (h.elite ? 1.4 : 1), h.z);
+        if (!hb.behind) { const w = 30, f = Math.max(0, h.hp / h.maxHp);
+          octx.fillStyle = 'rgba(0,0,0,.65)'; octx.fillRect(hb.x - w / 2 - 1, hb.y - 1, w + 2, 6);
+          octx.fillStyle = h.shieldHP > 0 ? '#7fc8ff' : '#ff5a3c'; octx.fillRect(hb.x - w / 2, hb.y, w * f, 4); } }
+      const q = toScreen(h.x, 0.6, h.z);
+      const off = q.behind || q.x < 8 || q.x > innerWidth - 8 || q.y < top || q.y > bot;
+      if (!off) continue;
+      let x = q.x, y = q.y;
+      if (q.behind) { x = innerWidth - x; y = bot; }
+      x = Math.max(22, Math.min(innerWidth - 22, x)); y = Math.max(top + 14, Math.min(bot - 14, y));
+      const ang = Math.atan2(q.y - y, q.x - x) || (q.behind ? Math.PI / 2 : 0);
+      octx.save(); octx.translate(x, y); octx.rotate(ang);
+      octx.fillStyle = 'rgba(40,14,6,.85)'; octx.strokeStyle = '#ff8a3d'; octx.lineWidth = 2.5;
+      octx.beginPath(); octx.moveTo(14, 0); octx.lineTo(-8, -11); octx.lineTo(-3, 0); octx.lineTo(-8, 11); octx.closePath(); octx.fill(); octx.stroke();
+      octx.restore();
+    }
   }
   for (const h of tbFoes()) { // name the special aliens so you learn what they do
     if (hiddenFoe(h) || !['burrower', 'shielder', 'eggsac', 'elite'].includes(h.type)) continue;
@@ -4408,7 +4570,7 @@ function drawTurnUI() {
     if (g) {
       groundCircle(g.x, g.z, 3.4, 32); octx.fillStyle = 'rgba(255,140,60,.18)'; octx.strokeStyle = '#ffaa55'; octx.fill(); octx.stroke();
       const n = tbFoes().filter(h => Math.hypot(h.x - g.x, h.z - g.z) < 3.4).length;
-      const c = proj(g.x, g.z); label(c.x, c.y - 30, `Frag · ${n} in blast${isTouch ? ' · tap again' : ''}`, '#ffcf9a');
+      const c = proj(g.x, g.z); label(c.x, c.y - 30, `Frag · ${n} in blast`, '#ffcf9a');
     }
     return;
   }
@@ -4416,7 +4578,7 @@ function drawTurnUI() {
     const a = proj(u.x, u.z), b = proj(pv.t.x, pv.t.z);
     octx.strokeStyle = '#ff6a5a'; octx.lineWidth = 2; octx.setLineDash([4, 5]); octx.beginPath(); octx.moveTo(a.x, a.y); octx.lineTo(b.x, b.y); octx.stroke(); octx.setLineDash([]);
     const i = pv.info, dmg = TBS[u.type] || TBS.trooper, k = u.dmg / TYPES[u.type].dmg * (pv.t.isBase ? TB_BASE_DMG : 1);
-    label(b.x, b.y + 34, `${pv.aimed ? 'Aimed shot' : 'Shoot'} · ${i.chance}% hit · ${i.crit}% crit · ${Math.round(dmg.dmg[0] * k)}-${Math.round(dmg.dmg[1] * k)} dmg · ${isTouch ? 'tap again' : 'click again'}`, '#ffd0c8');
+    label(b.x, b.y + 34, `${pv.aimed ? 'Aimed shot' : 'Shoot'} · ${i.chance}% hit · ${i.crit}% crit · ${Math.round(dmg.dmg[0] * k)}-${Math.round(dmg.dmg[1] * k)} dmg${isTouch ? '' : ' · click again'}`, '#ffd0c8');
     return;
   }
   if (pv && pv.kind === 'move') {
@@ -4427,7 +4589,7 @@ function drawTurnUI() {
     groundCircle(pv.x, pv.z, 0.55, 20); octx.fillStyle = col + '55'; octx.fill(); octx.stroke();
     const cov = coverAtSpot(pv.x, pv.z);
     const c = proj(pv.x, pv.z);
-    const txt = !ok ? 'Too far' : `${pv.ap === 2 ? 'Dash' : 'Move'}${cov === 2 ? ' · ● full cover' : cov === 1 ? ' · ◐ half cover' : cov === 0 ? ' · ⚠ no cover' : ''}${isTouch ? ' · tap again' : ''}`;
+    const txt = !ok ? 'Too far' : `${pv.ap === 2 ? 'Dash' : 'Move'}${cov === 2 ? ' · ● full cover' : cov === 1 ? ' · ◐ half cover' : cov === 0 ? ' · ⚠ no cover' : ''}`;
     label(c.x, c.y - 30, txt, cov === 0 ? '#ffb4a0' : col);
     // shields on the sides that would protect you there
     if (ok) for (const h of tbFoes().filter(f => f.alert)) {
@@ -4446,7 +4608,7 @@ tapButton($('btnFast'), toggleFast);
 const TUT = [
   'Your squad. The blue ring is how far a marine moves for 1 action; the dashed yellow ring is a dash (2 actions). Tap inside the blue ring to move.',
   'Rocks and containers give cover where you stand: ⛊ full, ◐ half. Aliens stay hidden until a marine sees them. Move the others, then End turn.',
-  'Contact! Tap an alien to see your hit chance, tap again to fire. If it has no cover on your side it is FLANKED: an easy crit.',
+  'Contact! Tap an alien to see your hit chance, then Fire. If it has no cover on your side it is FLANKED: an easy crit.',
   'Overwatch shoots the first alien that moves. Each class has an ability: Grenade, Shield wall, Aimed shot. Kills earn ◆ Focus; spend 2 to Drop in and fight live for 20s.',
 ];
 function tutShow(i) {
@@ -5036,10 +5198,11 @@ function frame(now) {
     if (e.dead) continue;
     if (e.isBase) { e.bodyMat.emissive.setHex(e.flash > 0 ? 0x552211 : 0); e.flash -= dt; continue; }
     e.mesh.position.set(e.x, 0, e.z);
-    if (e.team === PLAYER && !e.isTower) { // on the turn map your marines are drawn twice as big so you can find them on a phone
-      const want = turn.on && !turn.live && mode === 'rts' ? TB_MARINE_SCALE : 1;
+    if (!e.isTower) { // on the turn map units are drawn bigger so you can find them on a phone: marines 2x, aliens 1.5x
+      const want = turn.on && !turn.live && mode === 'rts' ? (e.team === PLAYER ? TB_MARINE_SCALE : TB_ALIEN_SCALE) : 1;
       e.big = (e.big || 1) + (want - (e.big || 1)) * Math.min(1, dt * 8);
     }
+    if (turn.on && !turn.live && e.ring) e.ring.visible = false; // the turn UI draws its own team discs and selection ring
     { const q = Math.max(0, e.flash) * 1.4, b = (e.baseScale || 1) * (e.big || 1); e.mesh.scale.set(b * (1 + q), b * (1 - q), b * (1 + q)); } // squash when hit
     if (e.upper && !(tac.on && tac.phase === 'plan')) animateBird(e, dt, now);
     e.mesh.rotation.y = e.facing;
