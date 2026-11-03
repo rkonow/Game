@@ -13,6 +13,23 @@ import { ShaderPass } from '../vendor/jsm/postprocessing/ShaderPass.js';
 import { GTAOPass } from '../vendor/jsm/postprocessing/GTAOPass.js';
 import { RoundedBoxGeometry } from '../vendor/jsm/geometries/RoundedBoxGeometry.js';
 
+// ---------------------------------------------------------------- fog of war (turn missions)
+// Every lit material darkens by a small world-space map: black where no marine has looked, dim where
+// they have been, clear where a marine can see right now. It rides on three.js's own fog chunks.
+THREE.ShaderChunk.fog_pars_vertex += '\n#ifdef USE_FOG\nvarying vec2 vFowXZ;\n#endif\n';
+THREE.ShaderChunk.fog_vertex += '\n#ifdef USE_FOG\nvFowXZ = (inverse(viewMatrix) * vec4(mvPosition.xyz, 1.0)).xz;\n#endif\n';
+THREE.ShaderChunk.fog_pars_fragment += '\n#ifdef USE_FOG\nvarying vec2 vFowXZ; uniform sampler2D fowMap; uniform float fowOn;\n#endif\n';
+THREE.ShaderChunk.fog_fragment += `
+#ifdef USE_FOG
+if (fowOn > 0.5) {
+  vec2 fu = (vFowXZ + 30.0) / 60.0;
+  float inside = step(0.0, fu.x) * step(fu.x, 1.0) * step(0.0, fu.y) * step(fu.y, 1.0);
+  float fv = mix(0.3, texture2D(fowMap, fu).r, inside);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb * vec3(0.06, 0.08, 0.12), gl_FragColor.rgb, fv);
+}
+#endif
+`;
+
 // ---------------------------------------------------------------- config
 const HALF = 30;            // map spans [-HALF, HALF] on X and Z
 const N = HALF * 2;         // pathfinding grid cells per side (1 unit each)
@@ -44,13 +61,31 @@ const LAUNCH = (() => { try { const v = sessionStorage.getItem('hivefall.launch'
 // story maps: [x, z, w, d, h] cover pieces, [x, z, w, d] rock ridges (impassable canyon walls), the relays, and both bases
 const STORY_MAPS = {
   crash: {
-    obstacles: [[-2, 19, 4, 1, 1.7], [2.5, 14, 1, 3, 1.7], [-18, 8, 3, 3, 2.6], [11, -5, 3, 3, 2.6], [18, 0, 3, 3, 2.6], [13, 3, 5, 1.2, 2],
-      [20, -6, 1, 4, 1.8], [-3, -13, 4, 1, 1.7], [7, -13, 4, 1, 1.7], [-19, -2, 5, 1.2, 2], [-2, 1, 5, 1.2, 2], [6, -4, 1, 4, 1.8]],
-    ridges: [[-6, 21, 2, 10], [6, 18, 2, 16], [-4, 9, 22, 2], [-24, 2, 2, 28], [-10, 4, 2, 8], [3, -9, 22, 2], [24, -4, 2, 24], [-14, -15, 2, 10]],
+    // an abandoned colony base: you crash in the south yard, breach the west hall, clear the east hangar,
+    // then cross the north courtyard to the comms relay
+    obstacles: [[-2, 19, 4, 1, 1.7], [2.5, 14, 1, 3, 1.7], [10, 18, 4, 2, 2.4], [-12, 20, 1, 3, 1.7], [-24, 5, 3, 3, 2.6],
+      [11, -5, 3, 3, 2.6], [18, 0, 3, 3, 2.6], [13, 3, 5, 1.2, 2], [20, -6, 1, 4, 1.8], [-19, -2, 5, 1.2, 2], [1, 5, 4, 1.2, 2], [9, -6, 1, 3, 1.8],
+      [-3, -13, 4, 1, 1.7], [7, -13, 4, 1, 1.7], [-16, -20, 3, 3, 2.6], [18, -22, 5, 2, 2.4], [-4, -26, 4, 1, 1.7]],
+    ridges: [],
+    base: {
+      walls: [[-28, 9, 28, 9, [[-18, -14]]], [-28, -10, -28, 9], [28, -10, 28, 9], [-4, -10, -4, 9, [[0, 3]]], [6, -10, 6, 9, [[-1.5, 2.5]]],
+        [-28, -10, 28, -10, [[-24, -20], [-1, 3], [11, 15]]], [-22, -10, -22, -3, [[-7, -5]]], [-28, -3, -22, -3]],
+      floors: [[-16, -0.5, 24, 19], [1, -0.5, 10, 19], [17, -0.5, 22, 19]],
+      lights: [[-16, 1, 0xffb070, 0], [1, -4, 0xff3a2a, 1], [17, -3, 0x9fd0ff, 0], [-25, -7, 0xff3a2a, 1], [13, 6, 0xffb070, 1]],
+    },
     points: [['R', 2, -17]],
   },
 };
 const STORY_MAP = LAUNCH && LAUNCH.story ? STORY_MAPS[LAUNCH.story] : null;
+// the other campaign missions fight over a walled colony compound: three relay buildings between a north and south wall
+const ARENA_BASE = {
+  walls: [[-30, 12, 30, 12, [[-3, 3], [-25, -21], [21, 25]]], [-30, -12, 30, -12, [[-6, 6], [-25, -21], [21, 25]]],
+    ...[-17, 0, 17].flatMap(x0 => [[x0 - 5, 5, x0 + 5, 5, [[x0 - 1.5, x0 + 1.5]]], [x0 - 5, -5, x0 + 5, -5, [[x0 - 1.5, x0 + 1.5]]],
+      [x0 - 5, -5, x0 - 5, 5, [[-1.5, 1.5]]], [x0 + 5, -5, x0 + 5, 5, [[-1.5, 1.5]]]])],
+  floors: [[0, 0, 60, 24], [-17, 0, 10, 10], [0, 0, 10, 10], [17, 0, 10, 10]],
+  lights: [[-17, 0, 0x9fd0ff, 0], [0, 0, 0xffb070, 1], [17, 0, 0x9fd0ff, 0], [-23, -12, 0xff3a2a, 1], [23, 12, 0xff3a2a, 1]],
+};
+const BASE_MAP = STORY_MAP ? STORY_MAP.base : LAUNCH ? ARENA_BASE : null;
 const POINT_DEFS = STORY_MAP ? STORY_MAP.points : [['A', -17, 0], ['B', 0, 0], ['C', 17, 0]];
 const POINT_R = 3;
 const REGEN_DELAY = 4, REGEN_RATE = 0.1; // ducks heal 10% of max hp per second once out of combat
@@ -416,7 +451,7 @@ const LANDMARKS = [[-46, -42, 10], [46, -44, 9], [48, 40, 11], [-50, 44, 9], [0,
     for (let i = 0; i < COUNT * 4 && n < COUNT; i++) {
       const x = (Math.random() - 0.5) * 150, z = (Math.random() - 0.5) * 150;
       const inside = Math.abs(x) < HALF + 1 && Math.abs(z) < HALF + 1;
-      if (inside && (Math.random() < 0.8 || [-17, 0, 17].some(l => Math.abs(x - l) < 3) || Math.abs(z) > 22)) continue;
+      if (inside && (BASE_MAP || Math.random() < 0.8 || [-17, 0, 17].some(l => Math.abs(x - l) < 3) || Math.abs(z) > 22)) continue;
       if (LANDMARKS.some(([lx, lz, lr]) => Math.hypot(x - lx, z - lz) < lr)) continue;
       const s = inside ? 0.15 + Math.random() * 0.25 : 0.6 + Math.random() * 2.6 * (Math.hypot(x, z) / 70);
       d.position.set(x, s * 0.25, z); d.rotation.set(Math.random() * 0.4, Math.random() * 6, Math.random() * 0.4); d.scale.set(s * (0.8 + Math.random() * 0.6), s, s * (0.8 + Math.random() * 0.6));
@@ -571,8 +606,7 @@ function updateAmbient(dt, now) {
 // ---------------------------------------------------------------- cover: cargo containers, crates, barriers, prefab huts
 // [x, z, width, depth, height]; layout is mirrored so both sides are fair.
 const OBSTACLE_DEFS = STORY_MAP ? STORY_MAP.obstacles : [
-  [-10, 0, 5, 1.2, 2], [10, 0, 5, 1.2, 2],
-  [0, -7, 1.2, 4, 1.8], [0, 7, 1.2, 4, 1.8],
+  ...(BASE_MAP ? [[3, -8.5, 1.2, 3, 1.8], [-3, 8.5, 1.2, 3, 1.8]] : [[-10, 0, 5, 1.2, 2], [10, 0, 5, 1.2, 2], [0, -7, 1.2, 4, 1.8], [0, 7, 1.2, 4, 1.8]]),
   [-18, -10, 3, 3, 2.6], [18, 10, 3, 3, 2.6], [-18, 10, 3, 3, 2.6], [18, -10, 3, 3, 2.6],
   [-6, -14, 4, 1, 1.7], [6, 14, 4, 1, 1.7], [6, -14, 4, 1, 1.7], [-6, 14, 4, 1, 1.7],
   [-25, 0, 1.2, 9, 2.2], [25, 0, 1.2, 9, 2.2],
@@ -646,6 +680,102 @@ if (STORY_MAP) { // canyon walls: a rock core lined with boulders so the silhoue
     }
     boxes.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h });
   });
+}
+
+// ---------------------------------------------------------------- the abandoned base: metal walls with doors, deck floors, failing lights
+const baseWalls = []; // {mesh, mat, minX, maxX, minZ, maxZ, ew, fade}
+const baseLights = [];
+const WALL_H = 3, WALL_T = 0.5;
+if (BASE_MAP) {
+  const deckTex = (() => { // worn deck plates with grime in the seams
+    const n = makeNoise(256, 8, 31), n2 = makeNoise(256, 32, 7);
+    const seam = (x, y) => (x % 64 < 2 || y % 64 < 2) ? -0.7 : 0;
+    const tread = (x, y) => (((x + y) % 16 < 2 || (x - y + 256) % 16 < 2) && x % 128 < 64 === y % 128 < 64) ? 0.25 : 0;
+    return surfaceTextures(256, (x, y) => seam(x, y) + tread(x, y) + n(x, y, 4) * 0.12,
+      (h, x, y) => { const g = 92 + (n(x, y, 4) - 0.5) * 40 + h * 30; const dirt = Math.max(0, n2(x, y, 3) - 0.55) * 2.2; return mixc([g * 0.95, g, g * 1.08], [70, 52, 40], Math.min(0.85, dirt)); },
+      3, 1, 1);
+  })();
+  for (const [x, z, w, d] of BASE_MAP.floors) {
+    const c = deckTex.col.clone(), nm = deckTex.nrm.clone(); c.needsUpdate = nm.needsUpdate = true;
+    c.repeat.set(w / 4, d / 4); nm.repeat.set(w / 4, d / 4);
+    const f = noRay(new THREE.Mesh(new THREE.PlaneGeometry(w, d), toon({ map: c, normalMap: nm, roughness: 0.55, metalness: 0.55, color: w > 30 ? 0x9a9a9a : 0xb4bcc8 })));
+    f.rotation.x = -Math.PI / 2; f.position.set(x, w > 30 ? 0.01 : 0.02, z); f.receiveShadow = true; scene.add(f);
+  }
+  const wallTex = (() => {
+    const n = makeNoise(256, 8, 41);
+    const panel = (x, y) => (x % 128 < 3 || y % 128 < 3) ? -0.6 : (y % 128 > 100 && y % 128 < 106) ? 0.3 : 0;
+    return surfaceTextures(256, (x, y) => panel(x, y) + n(x, y, 4) * 0.12,
+      (h, x, y) => { const g = 120 + h * 50 + (n(x, y, 4) - 0.5) * 30; const rust = Math.max(0, n((x * 3) % 256, (y * 2) % 256, 3) - 0.6) * 2.6; return mixc([g * 0.92, g * 0.98, g * 1.06], [110, 62, 36], Math.min(0.9, rust + (y > 220 ? 0.25 : 0))); },
+      3, 1, 1);
+  })();
+  const capMat = toon({ color: 0x23272e, roughness: 0.5, metalness: 0.7 });
+  const pillarMat = toon({ color: 0x3a4048, roughness: 0.45, metalness: 0.7 });
+  const hazardMat = toon({ map: stripeTex, roughness: 0.6, metalness: 0.2 });
+  const stripOk = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.5, 1.4, 2.2) });
+  const stripBad = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 0.25, 0.15) });
+  let seg = 0;
+  const wallBox = (x1, z1, x2, z2) => { // one solid stretch of wall
+    const ew = z1 === z2, len = ew ? Math.abs(x2 - x1) : Math.abs(z2 - z1); if (len < 0.3) return;
+    const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, w = ew ? len : WALL_T, d = ew ? WALL_T : len;
+    const col = wallTex.col.clone(), nm = wallTex.nrm.clone(); col.needsUpdate = nm.needsUpdate = true; col.repeat.set(len / 3, 1); nm.repeat.set(len / 3, 1);
+    const mat = toon({ map: col, normalMap: nm, roughness: 0.6, metalness: 0.5, color: 0xc4c8d0, transparent: false });
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, WALL_H, d), mat);
+    m.position.set(cx, WALL_H / 2, cz); m.castShadow = m.receiveShadow = true; scene.add(m); staticShootables.push(m);
+    const cap = noRay(new THREE.Mesh(new THREE.BoxGeometry(w + 0.08, 0.14, d + 0.08), capMat)); cap.position.set(cx, WALL_H + 0.07, cz); m.add(cap); cap.position.set(0, WALL_H / 2 + 0.07, 0);
+    // a light strip along both faces, some of them dead or blinking red
+    if (len > 2.5) for (const side of [-1, 1]) {
+      const bad = ((seg * 7 + (side > 0 ? 3 : 0)) % 5) === 0, dead = ((seg * 3 + (side > 0 ? 1 : 0)) % 7) === 0; if (dead) continue;
+      const st = noRay(new THREE.Mesh(new THREE.BoxGeometry(ew ? len * 0.7 : 0.04, 0.06, ew ? 0.04 : len * 0.7), bad ? stripBad : stripOk));
+      st.position.set(ew ? 0 : side * (WALL_T / 2 + 0.02), 0.9, ew ? side * (WALL_T / 2 + 0.02) : 0); m.add(st);
+    }
+    seg++;
+    const box = { minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, h: WALL_H, wall: true };
+    boxes.push(box);
+    baseWalls.push({ mesh: m, mat, ...box, ew, fade: 1 });
+  };
+  const doorFrame = (x, z, ew) => { // a pillar with a hazard band at each side of a doorway
+    const p = noRay(new THREE.Mesh(new THREE.BoxGeometry(0.7, WALL_H + 0.25, 0.7), pillarMat)); p.position.set(x, (WALL_H + 0.25) / 2, z); p.castShadow = true; scene.add(p);
+    const h = noRay(new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.35, 0.74), hazardMat)); h.position.set(x, 0.5, z); scene.add(h);
+    const l = noRay(new THREE.Mesh(new THREE.BoxGeometry(ew ? 0.2 : 0.74, 0.08, ew ? 0.74 : 0.2), stripBad)); l.position.set(x, WALL_H - 0.3, z); scene.add(l);
+  };
+  for (const [x1, z1, x2, z2, gaps = []] of BASE_MAP.walls) {
+    const ew = z1 === z2, a0 = ew ? Math.min(x1, x2) : Math.min(z1, z2), a1 = ew ? Math.max(x1, x2) : Math.max(z1, z2);
+    let a = a0;
+    for (const [g0, g1] of gaps.slice().sort((p, q) => p[0] - q[0])) {
+      if (ew) { wallBox(a, z1, g0, z1); doorFrame(g0, z1, ew); doorFrame(g1, z1, ew); } else { wallBox(x1, a, x1, g0); doorFrame(x1, g0, ew); doorFrame(x1, g1, ew); }
+      a = g1;
+    }
+    if (ew) wallBox(a, z1, a1, z1); else wallBox(x1, a, x1, a1);
+  }
+  // failing ceiling lamps: a hanging fixture plus a real light, some of them flickering
+  for (const [x, z, color, flicker] of BASE_MAP.lights) {
+    const L = new THREE.PointLight(color, 9, 13, 1.6); L.position.set(x, 2.6, z); scene.add(L);
+    const bulb = noRay(new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.25), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.2) })));
+    bulb.position.set(x, 2.75, z); scene.add(bulb);
+    baseLights.push({ L, bulb, base: 9, flicker, t: Math.random() * 10 });
+  }
+  // dusk over a dead colony: a lower, redder sun so the lamps and strips carry the scene
+  sun.intensity = 2.3; sun.color.setHex(0xffb184); hemi.intensity = 0.4;
+}
+function baseTick(dt) {
+  if (!BASE_MAP) return;
+  for (const b of baseLights) { // flicker: mostly on, sometimes stuttering off
+    b.t += dt;
+    let k = 1;
+    if (b.flicker) { const ph = b.t % 4.3; k = ph < 0.5 ? (Math.sin(b.t * 60) > 0.2 ? 1 : 0.1) : ph < 0.7 ? 0.15 : 0.85 + Math.sin(b.t * 3) * 0.15; }
+    b.L.intensity = b.base * k; b.bulb.visible = k > 0.3;
+  }
+  // walls in front of a unit (between it and the camera) turn see-through
+  const top = mode === 'rts';
+  const units = top ? entities.filter(e => !e.dead && !e.isBase && (e.team === PLAYER || !hiddenFoe(e))) : [];
+  for (const w of baseWalls) {
+    let want = 1;
+    if (top && w.ew) for (const e of units) if (e.x > w.minX - 0.8 && e.x < w.maxX + 0.8 && e.z < w.minZ + 0.1 && e.z > w.minZ - 3.6) { want = 0.22; break; }
+    w.fade += (want - w.fade) * Math.min(1, dt * 8);
+    const tr = w.fade < 0.98;
+    if (w.mat.transparent !== tr) { w.mat.transparent = tr; w.mat.depthWrite = !tr; w.mat.needsUpdate = true; }
+    w.mat.opacity = w.fade;
+  }
 }
 
 // ---------------------------------------------------------------- capture points: comms relays with a glowing core
@@ -4024,6 +4154,54 @@ function tbVision() {
   const mine = tbMine(), R = sightR();
   for (const h of tbFoes()) h.seen = !h.burrowed && ((h.revealN || 0) >= turn.n || mine.some(u => Math.hypot(u.x - h.x, u.z - h.z) < R && tbLOS(u, h)));
 }
+// ---- fog of war: what the squad has seen (dim) and sees now (clear); tall walls and containers block sight
+const FOW = { data: new Uint8Array(N * N), seen: new Uint8Array(N * N), wall: new Uint8Array(N * N), t: 0, patchT: 0 };
+FOW.tex = new THREE.DataTexture(FOW.data, N, N, THREE.RedFormat, THREE.UnsignedByteType);
+FOW.tex.magFilter = FOW.tex.minFilter = THREE.LinearFilter; FOW.tex.wrapS = FOW.tex.wrapT = THREE.ClampToEdgeWrapping;
+FOW.uMap = { value: FOW.tex }; FOW.uOn = { value: 0 };
+function fowWalls() {
+  FOW.wall.fill(0);
+  for (const b of boxes) if ((b.h || 0) >= 2.0 && !b.owner)
+    for (let j = toCell(b.minZ + 0.01); j <= toCell(b.maxZ - 0.01); j++) for (let i = toCell(b.minX + 0.01); i <= toCell(b.maxX - 0.01); i++) FOW.wall[j * N + i] = 1;
+}
+function fowPatch() { // hook every lit material into the fog-of-war uniforms (new materials are picked up on the next pass)
+  scene.traverse(o => {
+    const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+    for (const m of ms) {
+      if (!m || m.userData.fow || m.fog === false || m.isShaderMaterial || m.isSpriteMaterial || m.isLineBasicMaterial) continue;
+      m.userData.fow = true;
+      const prev = m.onBeforeCompile;
+      m.onBeforeCompile = function (sh, r) { if (prev) prev.call(this, sh, r); sh.uniforms.fowMap = FOW.uMap; sh.uniforms.fowOn = FOW.uOn; };
+      m.needsUpdate = true;
+    }
+  });
+}
+function fowUpdate() {
+  const R = sightR(), d = FOW.data, seen = FOW.seen, wall = FOW.wall;
+  for (let k = 0; k < d.length; k++) d[k] = seen[k] ? 105 : 0;
+  const mark = k => { d[k] = 255; seen[k] = 1; };
+  for (const u of tbMine()) {
+    const ci = toCell(u.x), cj = toCell(u.z);
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const i = ci + di, j = cj + dj; if (i >= 0 && j >= 0 && i < N && j < N) mark(j * N + i); }
+    for (let a = 0; a < 180; a++) {
+      const dx = Math.cos(a / 180 * Math.PI * 2), dz = Math.sin(a / 180 * Math.PI * 2);
+      for (let t = 0.5; t <= R; t += 0.45) {
+        const i = toCell(u.x + dx * t), j = toCell(u.z + dz * t), k = j * N + i;
+        if (Math.abs(u.x + dx * t) > HALF || Math.abs(u.z + dz * t) > HALF) break;
+        mark(k);
+        if (wall[k]) break; // you see the wall, not what is behind it
+      }
+    }
+  }
+  FOW.tex.needsUpdate = true;
+}
+function fowTick(dt) {
+  const on = turn.on && mode === 'rts' && !turn.live && !window.__noFow;
+  FOW.uOn.value = on ? 1 : 0;
+  if (!on) return;
+  if ((FOW.patchT -= dt) <= 0) { FOW.patchT = 1; fowPatch(); }
+  if ((FOW.t -= dt) <= 0) { FOW.t = 0.12; fowUpdate(); }
+}
 // soldier barks on the radio
 const BARKS = {
   kill: ['Target down!', 'Got it!', 'Scratch one!', 'That one\'s done.', 'Stay down!'],
@@ -4045,6 +4223,7 @@ const tbFoes = () => entities.filter(e => !e.dead && e.team === ENEMY && !e.isBa
 
 const TB_MARINE_SCALE = 1.5, TB_ALIEN_SCALE = 1.45; // the camera sits close on phones, so units only need a modest boost
 function startTurns() {
+  FOW.seen.fill(0); fowWalls(); FOW.patchT = 0;
   turn.on = true; turn.n = 1; turn.side = 'player';
   document.body.classList.add('xcom');
   for (const u of tbMine()) { u.ap = 2; u.gren = u.type === 'trooper' ? 1 + (hasPerk(u, 'grenade') ? 1 : 0) : 0; }
@@ -4710,6 +4889,7 @@ function tbUITick() {
   if (u && tbUI.abil !== u.type) { tbUI.abil = u.type; const i = $('btnTGren').querySelector('i'); if (i) i.innerHTML = tbSvg(TB_ICON[u.type] ? u.type : 'trooper'); }
 }
 function turnTick(dt) {
+  fowTick(dt);
   turn.visT = (turn.visT || 0) - dt;
   if (turn.visT <= 0) { turn.visT = 0.15; tbVision(); }
   // watchdog: a player action should never lock the controls for long
@@ -4940,10 +5120,10 @@ function turnKey(code) {
 // Everything lives in localStorage; the page reloads between missions so each one starts from a clean world.
 const CAMP_KEY = 'hivefall.campaign';
 const MISSIONS = [
-  { id: 'crash', name: 'Crash Site', where: 'Kepler canyons', kind: 'live', story: 'crash', squad: 4, ore: 0,
-    goal: { type: 'story' }, goalText: 'Fight through the canyons to the colony relay and find the survivor',
+  { id: 'crash', name: 'Crash Site', where: 'Kepler colony base', kind: 'live', story: 'crash', squad: 4, ore: 0,
+    goal: { type: 'story' }, goalText: 'Fight through the abandoned colony base to the comms relay and find the survivor',
     twist: 'Story mission with checkpoints: if your squad is wiped out, you restart from the last one. Ore buys reinforcements, dropped at your last checkpoint.',
-    brief: 'The colony went dark three days ago. On approach, something hit our dropship. We are going down in the canyons, miles from anywhere.' },
+    brief: 'The colony went dark three days ago. On approach, something hit our dropship. We are going down outside the colony base.' },
   { id: 'holdline', name: 'Hold the Line', where: 'Refinery approach', kind: 'tactics', squad: 6, ore: 80,
     goal: { type: 'rounds', n: 6 }, goalText: 'Hold the outpost for 6 turns',
     twist: 'Swarm surge: more aliens every turn', surge: 2, tyrantEvery: 99, tb: { turns: 6, spawn: 3, every: 1 },
@@ -5221,18 +5401,18 @@ const STORIES = {
     { name: 'Crash site', cp: [0, 21], at: [-16, 13], r: 4.5, goal: 'Reach checkpoint Alpha',
       run() {
         say([['Pilot', 'Mayday, mayday! We are going down!'], ['Sgt', 'Everyone out, form up on me. Check your gear.'],
-          ['Command', 'Your only way to the colony is the canyon to the west. Move to checkpoint Alpha.']]);
+          ['Command', 'The colony base is dark. The west airlock is still open. Move to checkpoint Alpha.']]);
         foes([['trooper', -14, 4], ['trooper', -12, 5], ['trooper', -16, 6]], 'idle');
       } },
-    { name: 'Checkpoint Alpha', cp: [-16, 12], at: [14, -2], r: 6, clear: 11, goal: 'Clear the mining camp',
+    { name: 'Checkpoint Alpha', cp: [-16, 12], at: [14, -2], r: 6, clear: 11, goal: 'Clear the east hangar',
       run() {
         say([['Command', 'Checkpoint Alpha. Your progress is saved.'], ['Ranger', 'Tracks everywhere. Something dragged equipment out of here.'],
-          ['Command', 'Mining camp to the east. Clear it. There could be survivors.']]);
+          ['Command', 'The east hangar is crawling with them. Clear it. There could be survivors.']]);
         foes([['trooper', 12, -6], ['trooper', 16, -3], ['heavy', 14, 2], ['sniper', 19, -5], ['sniper', 9, 0], ['eggsac', 17, -8]], 'idle');
       } },
     { name: 'Checkpoint Bravo', cp: [12, -1], at: [2, -15], r: 5, goal: 'Reach the comms relay',
       run() {
-        say([['Command', 'Checkpoint Bravo. Camp clear?'], ['Sgt', 'Clear. No survivors. Just empty bunks.'],
+        say([['Command', 'Checkpoint Bravo. Hangar clear?'], ['Sgt', 'Clear. No survivors. Just empty bunks.'],
           ['???', '...this is Ada Brecht at the north relay... please, they are everywhere... please hurry...'],
           ['Sgt', 'You heard her. Move up to the relay, double time.']]);
         foes([['trooper', 19, -13], ['shielder', 18, -15], ['trooper', 17, -16], ['sniper', 8, -19], ['trooper', -6, -18]], 'idle');
@@ -5519,7 +5699,8 @@ function frame(now) {
   updateCamera(dt);
   if (window.__camOverride) window.__camOverride(camera);
   if (camp.m) campaignTick(dt);
-  if (turn.on && mode === 'rts') turnTick(dt);
+  if (turn.on && mode === 'rts') turnTick(dt); else FOW.uOn.value = 0;
+  baseTick(dt);
   if (turn.on) liveTick(dt);
   if (mode !== 'menu') updateHud(dt); else if (toastTimer > 0) toastTimer -= dt;
   renderFrame(dt);
