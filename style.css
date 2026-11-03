@@ -654,12 +654,12 @@ body.tbui.tbEnemy:not(.fps) #toast { top: calc(100px + env(safe-area-inset-top))
     padding: 6px 6px calc(6px + env(safe-area-inset-bottom)) 6px; padding-right: calc(6px + env(safe-area-inset-right));
     border: 0; border-left: 1px solid #1f2c3b; border-radius: 0; overflow-y: auto; gap: 5px; }
   #tbSquad { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
-  #tbSquad button { height: 58px; padding: 3px 4px; }
-  #tbActs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
-  #tbActs button { height: 44px; }
-  #tbRow { flex-direction: column-reverse; gap: 4px; }
-  #tbShopBtn { width: 100%; height: 38px; }
-  #tbRow #btnEndTurn { flex: none; height: 46px; }
+  #tbSquad button { height: 54px; padding: 3px 4px; }
+  #tbActs { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+  #tbActs button { height: 46px; font-size: 10px; }
+  #tbRow { flex-direction: row; gap: 4px; flex: none; }
+  #tbShopBtn { width: auto; flex: 0 0 38%; height: 44px; }
+  #tbRow #btnEndTurn { flex: 1; height: 44px; }
   #tbShop { grid-template-columns: 1fr; }
   #tbCenter { bottom: calc(12px + env(safe-area-inset-bottom)); right: calc(min(300px, 40vw) + 12px); }
   body.tbui:not(.fps) #coach { left: calc(12px + env(safe-area-inset-left)); transform: none; width: calc(100vw - min(300px, 40vw) - 36px); max-width: 460px;

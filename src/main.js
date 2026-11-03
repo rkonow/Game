@@ -3968,7 +3968,7 @@ function bark(u, kind) {
 const tbMine = () => entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower);
 const tbFoes = () => entities.filter(e => !e.dead && e.team === ENEMY && !e.isBase);
 
-const TB_MARINE_SCALE = 2, TB_ALIEN_SCALE = 1.5;
+const TB_MARINE_SCALE = 1.5, TB_ALIEN_SCALE = 1.3; // the camera sits close on phones, so units only need a modest boost
 function startTurns() {
   turn.on = true; turn.n = 1; turn.side = 'player';
   document.body.classList.add('xcom');
@@ -3977,6 +3977,11 @@ function startTurns() {
   tbUISetup();
   startGame();
   rts.zoom = camera.aspect < 1 ? 24 : innerHeight <= 560 ? 19 : 26; // close enough to see your marines; pinch to zoom
+  if (playerBase && !playerBase.dead) { // no command bunker on turn missions: it only got in the squad's way
+    playerBase.dead = true; scene.remove(playerBase.mesh);
+    const bi = boxes.indexOf(playerBase.box); if (bi >= 0) boxes.splice(bi, 1);
+    rebuildGrid();
+  }
   setTimeout(tutStart, 1500);
   toast(isTouch ? 'Tap a marine, then a spot or an alien' : 'Click a marine, then a spot or an alien', 3.5);
   setTimeout(() => beginPlayerTurn(true), 400);
@@ -4065,7 +4070,11 @@ function tbMove(u, x, z, path) {
   return new Promise(res => {
     u.path = path || findPath(u.x, u.z, x, z); u.pathGoal = { x, z }; u.order = { type: 'idle' };
     u.moveDone = res;
-    const safety = setInterval(() => { if (u.dead || !u.path) { clearInterval(safety); if (u.moveDone) { u.moveDone = null; res(); } } }, 200);
+    let ticks = 0; const limit = 30 + Math.ceil((u.path ? u.path.length : 4) * 4 / (window.__tbFast || 1));
+    const safety = setInterval(() => {
+      if (++ticks > limit && u.path) { u.path = null; u.pathGoal = null; } // stuck (blocked by someone): stop where it is
+      if (u.dead || !u.path) { clearInterval(safety); if (u.moveDone) { u.moveDone = null; res(); } }
+    }, 200);
   });
 }
 async function tbShoot(a, t, opt = {}) {
@@ -4200,7 +4209,7 @@ async function tbAct(fn) {
 }
 function moveCost(u, x, z) {
   if (!isFree(toCell(x), toCell(z))) return null;
-  if (entities.some(e => !e.dead && e !== u && !e.isBase && Math.hypot(e.x - x, e.z - z) < (turn.on ? 1.4 : 0.9))) return null; // marines are drawn big on the turn map: keep them from overlapping
+  if (entities.some(e => !e.dead && e !== u && !e.isBase && Math.hypot(e.x - x, e.z - z) < (turn.on ? 1.15 : 0.9))) return null; // marines are drawn big on the turn map: keep them from overlapping
   const path = findPath(u.x, u.z, x, z);
   const L = pathLen(u, path), R = moveR(u);
   const ap = L <= R ? 1 : L <= R * 2 && u.ap >= 2 ? 2 : 0;
@@ -4624,6 +4633,11 @@ function tbUITick() {
 function turnTick(dt) {
   turn.visT = (turn.visT || 0) - dt;
   if (turn.visT <= 0) { turn.visT = 0.15; tbVision(); }
+  // watchdog: a player action should never lock the controls for long
+  if (turn.side === 'player' && turn.busy && !turn.live && mode === 'rts') {
+    turn.busyT = (turn.busyT || 0) + dt;
+    if (turn.busyT > 12) { console.warn('turn watchdog: unlocking'); turn.busyT = 0; setActionCam(null); for (const e of entities) if (!e.dead && e.path && !e.isBase) e.path = null; tbAfterAction(); }
+  } else turn.busyT = 0;
   if (turn.focusT > 0) { turn.focusT -= dt; rts.focus.lerp(turn.focus, Math.min(1, dt * 4)); }
   const tag = $('modeTag');
   tag.innerHTML = (turn.side === 'player' ? `<b>YOUR TURN</b> ${turn.n}` : `<b>ALIEN TURN</b>${turn.fast ? ' ⏩' : ''}`) + ` <span class="fp" title="Focus: earned by kills and crits, spent to drop in">◆ ${turn.fp}</span>`;
@@ -4732,9 +4746,15 @@ function drawTurnUI() {
   for (const h of tbFoes().concat(enemyBase && !enemyBase.dead ? [enemyBase] : [])) {
     if (u.ap <= 0) break;
     const info = shotInfo(u, h, u.x, u.z, false, turn.tool === 'aimed'); if (!info) continue;
-    const s = toScreen(h.x, h.isBase ? 6 : 2.7, h.z); if (s.behind) continue;
+    const s = toScreen(h.x, h.isBase ? 6 : 1.25 * (h.big || 1) * (h.elite ? 1.4 : 1), h.z); if (s.behind) continue;
     const sel = turn.pending && turn.pending.t === h;
-    label(s.x, s.y, `${info.chance}%${info.cover === 0 && !h.isBase ? ' · FLANKED' : info.cover === 1 ? ' · ◐' : info.cover === 2 ? ' · ●' : ''}`, sel ? '#ffffff' : info.chance >= 65 ? '#9dffc4' : info.chance >= 40 ? '#ffd36a' : '#ff9a8a');
+    // a small chip over the health bar: the hit chance, gold when flanked (an easy crit)
+    const txt = `${info.chance}%`, flank = info.cover === 0 && !h.isBase;
+    octx.font = '800 11px system-ui'; const w = octx.measureText(txt).width + 10, y = s.y - 16;
+    octx.fillStyle = sel ? '#ffffff' : flank ? '#ffd36a' : 'rgba(10,14,20,.85)';
+    octx.beginPath(); octx.roundRect ? octx.roundRect(s.x - w / 2, y - 8, w, 16, 8) : octx.rect(s.x - w / 2, y - 8, w, 16); octx.fill();
+    octx.fillStyle = sel || flank ? '#0b1119' : info.chance >= 65 ? '#9dffc4' : info.chance >= 40 ? '#ffd36a' : '#ff9a8a';
+    octx.textAlign = 'center'; octx.fillText(txt, s.x, y + 4);
   }
   // the preview: hover on desktop, the first tap on phones
   let pv = turn.pending;
@@ -5383,7 +5403,7 @@ function frame(now) {
     if (e.isBase) { e.bodyMat.emissive.setHex(e.flash > 0 ? 0x552211 : 0); e.flash -= dt; continue; }
     e.mesh.position.set(e.x, 0, e.z);
     if (!e.isTower) { // on the turn map units are drawn bigger so you can find them on a phone: marines 2x, aliens 1.5x
-      const want = turn.on && !turn.live && mode === 'rts' ? (e.team === PLAYER ? TB_MARINE_SCALE : TB_ALIEN_SCALE) : 1;
+      const want = turn.on && !turn.live && mode === 'rts' && !turn.cam ? (e.team === PLAYER ? TB_MARINE_SCALE : TB_ALIEN_SCALE) : 1;
       e.big = (e.big || 1) + (want - (e.big || 1)) * Math.min(1, dt * 8);
     }
     { const q = Math.max(0, e.flash) * 1.4, b = (e.baseScale || 1) * (e.big || 1); e.mesh.scale.set(b * (1 + q), b * (1 - q), b * (1 + q)); } // squash when hit
