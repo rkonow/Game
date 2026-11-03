@@ -2830,6 +2830,20 @@ function aimAssist(dt) {
 
 // ---------------------------------------------------------------- camera
 const dummy = new THREE.PerspectiveCamera(); // camera so lookAt faces -Z
+// on the turn map the panel covers part of the screen: shift the projection so the camera's centre
+// sits in the middle of the map you can actually see (taps and labels follow automatically)
+let panelEl = null, panelT = 0, panelOff = [0, 0];
+function panelViewOffset() {
+  const on = turn.on && mode === 'rts' && !turn.cam && document.body.classList.contains('tbui');
+  if (on && --panelT <= 0) {
+    panelT = 15; panelEl = panelEl || $('tbPanel');
+    const r = panelEl && panelEl.getBoundingClientRect(), W = innerWidth, H = innerHeight;
+    panelOff = !r || !r.width ? [0, 0] : r.left > W * 0.4 && r.height > H * 0.6 ? [W - r.left, 0] : r.top > H * 0.3 ? [0, H - r.top] : [0, 0];
+  }
+  const [px, py] = on ? panelOff : [0, 0];
+  if (px || py) camera.setViewOffset(innerWidth + px, innerHeight + py, px, py, innerWidth, innerHeight);
+  else if (camera.view && camera.view.enabled) camera.clearViewOffset();
+}
 function rtsPose() {
   const z = rts.zoom;
   dummy.position.set(rts.focus.x, z, rts.focus.z + z * 0.72);
@@ -2904,6 +2918,7 @@ function updateCamera(dt) {
     camera.quaternion.copy(pose.quat);
     camera.fov += (pose.fov - camera.fov) * Math.min(1, dt * 14);
   }
+  panelViewOffset();
   if (window.__camLook) { const c = window.__camLook; camera.position.set(...c.pos); camera.lookAt(...c.at); camera.fov = c.fov || 40; } // debug: fixed shots for screenshots
   camera.updateProjectionMatrix();
   // recoil springs back, the gun kicks, sways against your look and bobs as you walk
@@ -4092,8 +4107,7 @@ function floatText(x, z, text, color, big = false) {
   dmgNums.push({ x, y: 2.2, z, text, life: 1.6, crit: big, dx: 0, color });
 }
 function focusOn(x, z) { // keep the unit in the part of the screen the turn panel leaves free
-  const side = turn.on && camera.aspect > 1 && innerHeight <= 560;
-  turn.focus.set(x + (side ? rts.zoom * 0.2 : 0), 0, z + (camera.aspect < 1 ? 2 : 0)); turn.focusT = 0.9;
+  turn.focus.set(x, 0, z); turn.focusT = 0.9; // the view itself is shifted off the panel (see panelViewOffset)
 }
 
 // ---- per frame: units walk their paths, overwatch reacts to anything that moves
