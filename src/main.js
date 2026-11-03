@@ -1319,7 +1319,7 @@ function dropLoot(e) {
 function updateLoot(dt) {
   for (let i = loot.length - 1; i >= 0; i--) {
     const l = loot[i];
-    l.life -= dt;
+    if (!turn.on) l.life -= dt; // in the campaign loot fades by turns instead
     // pop up, then hover and spin
     if (l.vy !== 0) { l.vy -= 12 * dt; l.y += l.vy * dt; if (l.y <= 0.45) { l.y = 0.45; l.vy = 0; } }
     l.g.position.y = l.y + (l.vy === 0 ? Math.sin(game.time * 3 + l.x) * 0.06 : 0);
@@ -1750,6 +1750,7 @@ function updateUnit(u, dt) {
   u.invulnT = (u.invulnT || 0) - dt;
   u.slowT = (u.slowT || 0) - dt;
   u.moving = false;
+  if (turn.on && !u.isTower) { turnUnit(u, dt); return; }
   // ducks patch themselves up after 4s out of the fight
   if (u.team === PLAYER && u.hp < u.maxHp && game.time - (u.hurtAt ?? -99) > REGEN_DELAY) u.hp = Math.min(u.maxHp, u.hp + u.maxHp * REGEN_RATE * dt);
   if (u.isTower) { updateTower(u, dt); return; }
@@ -1924,16 +1925,17 @@ function spawnPlayer(type) {
     const u = makeUnit(PLAYER, type, cx + (Math.random() - 0.5) * 3, cz + (Math.random() - 0.5) * 3);
     smoke(u.x, 0.4, u.z, 1.6, 6);
     radio(`Reinforcement ${NAMES[PLAYER][type].toLowerCase()} dropped at ${story.def[story.checkpoint].name}`, 'good', { dropAt: u });
+    if (turn.on) { u.ap = 2; u.gren = type === 'trooper' ? 1 : 0; }
     return u;
   }
   const u = makeUnit(PLAYER, type, (Math.random() - 0.5) * 3, 21.5);
-  if (tac.on) { u.x = (Math.random() - 0.5) * 6; u.z = 19 + Math.random(); return u; } // ready to be ordered
+  if (tac.on || turn.on) { u.x = (Math.random() - 0.5) * 6; u.z = 19 + Math.random(); if (turn.on) { u.ap = 2; u.gren = type === 'trooper' ? 1 : 0; } return u; } // ready to be ordered
   commandMove([u], (Math.random() - 0.5) * 8, 17 - Math.random() * 2, 'move', true);
   return u;
 }
 
 function buy(type) {
-  if (mode !== 'rts' || (tac.on && tac.phase !== 'plan')) return;
+  if (mode !== 'rts' || (tac.on && tac.phase !== 'plan') || (turn.on && (turn.side !== 'player' || turn.busy))) return;
   if (TOWERS.includes(type)) {
     if (!tac.on) return;
     if (game.cp < COSTS[type]) { toast(`${NAMES[PLAYER][type]} costs ${COSTS[type]} ore`, 1); return; }
@@ -2188,6 +2190,7 @@ const raycaster = new THREE.Raycaster();
 const tmpV = new THREE.Vector3();
 
 function possess(u) {
+  if (turn.on) return; // the campaign is played from the command view
   if (!u || u.dead || u.isBase || u.isTower || u.team !== PLAYER) return;
   if (tac.on) {
     if (tac.phase === 'plan') { tac.hero = u; selection = [u]; updateButtons(); toast(`★ ${nameOf(u)} is your hero this round`, 1.2); return; }
@@ -2614,7 +2617,7 @@ function updateCamera(dt) {
     rts.focus.x = Math.max(-HALF, Math.min(HALF, rts.focus.x));
     rts.focus.z = Math.max(-HALF, Math.min(HALF, rts.focus.z));
   }
-  const pose = mode === 'fps' && possessed ? fpsPose() : mode === 'menu' ? menuPose() : rtsPose();
+  const pose = mode === 'fps' && possessed ? fpsPose() : mode === 'menu' ? menuPose() : turn.cam ? actionPose() : rtsPose();
   if (trans) {
     trans.t += dt;
     const k = Math.min(1, trans.t / trans.dur);
@@ -2718,7 +2721,7 @@ canvas.addEventListener('pointerdown', e => {
   try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   const p = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, button: e.button, type: e.pointerType };
   pointers.set(e.pointerId, p);
-  if (mode === 'rts' && (e.button === 0 || e.pointerType === 'touch') && pointers.size === 1) {
+  if (mode === 'rts' && !turn.on && (e.button === 0 || e.pointerType === 'touch') && pointers.size === 1) {
     const ent = pickEntity(e.clientX, e.clientY);
     if (ent && ent.team === PLAYER && !ent.isBase && !ent.isTower) p.unit = ent; // dragging from a bird gives it a move order
   }
@@ -2768,6 +2771,7 @@ canvas.addEventListener('pointermove', e => {
     return;
   }
   if ((p.button === 0 || p.type === 'touch') && Math.hypot(p.x - p.sx, p.y - p.sy) > 10) {
+    if (turn.on) { gesture = { mx: p.x, my: p.y, dist: 0, touch: false }; return; } // in the campaign one finger pans the map
     if (p.unit && !p.unit.dead) {
       if (!orderDrag) { if (!selection.includes(p.unit)) { selection = [p.unit]; updateButtons(); } }
       orderDrag = { x: p.x, y: p.y };
@@ -2810,6 +2814,7 @@ function handleTap(sx, sy, { secondary, shift, ctrl, touch }) {
   const ent = pickEntity(sx, sy);
   const gp = groundPoint(sx, sy);
   const sel = liveSelection();
+  if (turn.on) { turnTap(ent, gp, { secondary, touch }); return; }
   if (tac.on) { tacticsTap(ent, gp, sel, { secondary, shift, touch }); return; }
   if (amoveArmed && !secondary) {
     amoveArmed = false; updateButtons();
@@ -2843,7 +2848,8 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Tab') e.preventDefault();
   if (e.repeat) return;
   keys.add(e.code);
-  if (mode === 'rts' && tac.on) {
+  if (mode === 'rts' && turn.on) turnKey(e.code);
+  else if (mode === 'rts' && tac.on) {
     if (e.code === 'KeyQ') selectAll();
     else if (e.code === 'Escape') { setTool('move'); selection = []; updateButtons(); }
     else if (tac.phase === 'plan') {
@@ -3044,7 +3050,7 @@ function renderTopbar(dt) {
   const pb = Math.max(0, playerBase.hp / playerBase.maxHp), eb = Math.max(0, enemyBase.hp / enemyBase.maxHp);
   const nest = p => `<span class="nest ${p.owner === PLAYER ? 'mine' : p.owner === ENEMY ? 'theirs' : ''}${p.contested ? ' fight' : ''}">${p.name}</span>`;
   const bar = (label, k, cls, extra = '') => `<span class="base ${cls}"><b>${label}</b><em><s style="width:${Math.round(k * 100)}%"></s></em>${extra}</span>`;
-  const timer = camp.m && camp.m.story ? '' : tac.on ? `<span class="chip">👾 ${countUnits(ENEMY)} vs 🪖 ${countUnits(PLAYER)}</span>` : `<span class="chip">👾 wave in ${Math.ceil(waveTimer)}s</span>`;
+  const timer = camp.m && camp.m.story ? '' : tac.on || turn.on ? `<span class="chip">👾 ${countUnits(ENEMY)} vs 🪖 ${countUnits(PLAYER)}</span>` : `<span class="chip">👾 wave in ${Math.ceil(waveTimer)}s</span>`;
   $('status').innerHTML = `<span class="nests">${points.map(nest).join('')}</span>${bar('Outpost', pb, 'ours')}${bar('Hive', eb, 'enemy', enemyBase.shield ? '<i title="Bio-shield: hold all 3 relays">🛡</i>' : '<i title="Cracked!">💥</i>')}${timer}${campaignObjective()}`;
 }
 
@@ -3070,7 +3076,7 @@ function startGame(tactics = false) {
     return;
   }
   toast(isTouch ? 'Double-tap a marine to take control' : 'Double-click a marine (or press F) to take control', 3);
-  if (!(camp.m && camp.m.story)) setTimeout(() => radio('Only YOU can capture a relay: drop into a marine and stand on relay B', 'good', { dropAt: points[1] }), 1200);
+  if (!(camp.m && camp.m.story) && !turn.on) setTimeout(() => radio('Only YOU can capture a relay: drop into a marine and stand on relay B', 'good', { dropAt: points[1] }), 1200);
 }
 
 function endGame(won, text) {
@@ -3471,7 +3477,7 @@ function drawOverlay() {
     if (e.stunT > 0) { octx.font = '14px system-ui'; octx.fillText('💫', s.x, s.y - 6); }
     if (e.lvl > 1) { octx.font = '700 10px system-ui'; octx.fillStyle = '#ffd84a'; octx.fillText('★'.repeat(e.lvl - 1), s.x, s.y - 3); }
   }
-  drawOrderUI();
+  if (turn.on) drawTurnUI(); else drawOrderUI();
   if (tac.on) drawPlans();
   if (hawk.t > 0 && mode === 'fps') { // hens marked through walls
     for (const e of entities) {
@@ -3555,7 +3561,7 @@ function updateHud(dt) {
   renderTopbar(dt);
   refreshPortraitHp();
   const income = CP_BASE + CP_PER_POINT * playerPointCount();
-  $('cpText').innerHTML = tac.on ? `💠 <b>${Math.floor(game.cp)}</b>` : `💠 <b>${Math.floor(game.cp)}</b> <small>+${income.toFixed(1)}/s</small>`;
+  $('cpText').innerHTML = tac.on || turn.on ? `💠 <b>${Math.floor(game.cp)}</b>` : `💠 <b>${Math.floor(game.cp)}</b> <small>+${income.toFixed(1)}/s</small>`;
   for (const [id, t] of [['btnBuyTrooper', 'trooper'], ['btnBuyHeavy', 'heavy'], ['btnBuySniper', 'sniper']]) $(id).classList.toggle('off', game.cp < COSTS[t]);
   setLabel('btnPossess', game.relink > 0 ? `Drop in ${Math.ceil(game.relink)}s` : 'Drop in');
   $('btnPossess').classList.toggle('off', game.relink > 0);
@@ -3628,14 +3634,14 @@ function animateBird(e, dt, now) {
 // ---------------------------------------------------------------- main loop
 function simulate(simDt, dt) {
   game.time += simDt;
-  if (!tac.on) game.cp = Math.min(CP_MAX, game.cp + (CP_BASE + CP_PER_POINT * playerPointCount()) * simDt);
+  if (!tac.on && !turn.on) game.cp = Math.min(CP_MAX, game.cp + (CP_BASE + CP_PER_POINT * playerPointCount()) * simDt);
   if (game.relink > 0) game.relink -= simDt;
   if (mode === 'fps') updateFPS(dt, simDt);
   for (const e of entities) if (!e.dead && !e.isBase) updateUnit(e, simDt);
   separate();
-  updatePoints(simDt);
+  if (!turn.on) updatePoints(simDt);
   if (tac.on) updateRound(simDt);
-  else { updateEnemyOrders(simDt); updateBases(simDt); }
+  else if (!turn.on) { updateEnemyOrders(simDt); updateBases(simDt); }
   updateGrenades(simDt);
   updateBullets(simDt);
   updateLoot(simDt);
@@ -3645,6 +3651,532 @@ function simulate(simDt, dt) {
   entities = entities.filter(e => !e.dead);
   selection = selection.filter(e => !e.dead);
 }
+// ---------------------------------------------------------------- turn-based squad tactics (the campaign): both sides take turns
+// Each marine has 2 action points: move (1), dash (2), or move then shoot. Shooting, overwatch, hunkering and grenades end its turn.
+// Hit chance comes from aim, range and cover (half or full, measured from the shooter's side); a target without cover is flanked
+// and easier to crit. Then every alien that has spotted you acts, and overwatch fires at anything that moves in range.
+const TBS = {
+  trooper: { move: 8, dmg: [22, 30] }, heavy: { move: 6.5, dmg: [34, 46] }, sniper: { move: 7, dmg: [44, 58] }, elite: { move: 9, dmg: [30, 42] },
+};
+const TB_ALIEN_DMG = 0.62, TB_BASE_DMG = 3; // aliens hit a bit softer; the hive takes triple damage so it can be burned in a few turns
+const turn = { on: false, side: 'player', n: 1, sel: null, busy: false, tool: 'move', pending: null, hover: null, hoverKey: '', cam: null, focusT: 0, focus: new THREE.Vector3(), spawnT: 0 };
+const tbSurvive = st => Math.ceil(st.survive / 12);
+const wait = ms => new Promise(r => setTimeout(r, ms * (window.__tbFast || 1)));
+const tbMine = () => entities.filter(e => !e.dead && e.team === PLAYER && !e.isBase && !e.isTower);
+const tbFoes = () => entities.filter(e => !e.dead && e.team === ENEMY && !e.isBase);
+
+function startTurns() {
+  turn.on = true; turn.n = 1; turn.side = 'player';
+  document.body.classList.add('xcom');
+  for (const u of tbMine()) { u.ap = 2; u.gren = u.type === 'trooper' ? 1 : 0; }
+  startGame();
+  toast(isTouch ? 'Tap a marine, then a spot or an alien' : 'Click a marine, then a spot or an alien', 3.5);
+  setTimeout(() => beginPlayerTurn(true), 400);
+}
+// line of sight that lets you lean out from cover: a box hugging either end of the line does not block it
+function tbLOS(a, b, ax = a.x, az = a.z) {
+  for (const box of boxes) {
+    if (box.owner === b || box.owner === a) continue;
+    if (!segHitsBox(ax, az, b.x, b.z, box)) continue;
+    const near = (x, z) => Math.hypot(Math.max(box.minX - x, 0, x - box.maxX), Math.max(box.minZ - z, 0, z - box.maxZ)) < 1.5;
+    if (near(ax, az) || near(b.x, b.z)) continue;
+    return false;
+  }
+  return true;
+}
+// cover the target has against a shooter at (sx, sz): 0 none (flanked), 1 half (low barriers), 2 full (containers, huts, rock)
+function coverFrom(tx, tz, sx, sz) {
+  const d = Math.hypot(sx - tx, sz - tz) || 1, ux = (sx - tx) / d, uz = (sz - tz) / d;
+  let best = 0;
+  for (const b of boxes) {
+    if (b.owner) continue;
+    if (Math.hypot(Math.max(b.minX - tx, 0, tx - b.maxX), Math.max(b.minZ - tz, 0, tz - b.maxZ)) > 1.4) continue;
+    if (!segHitsBox(tx, tz, tx + ux * 1.9, tz + uz * 1.9, b)) continue;
+    best = Math.max(best, (b.h ?? 3) >= 2 ? 2 : 1);
+  }
+  return best;
+}
+function shotInfo(a, t, ax = a.x, az = a.z, overwatch = false) {
+  const d = Math.hypot(t.x - ax, t.z - az) - (t.isBase ? t.radius : 0);
+  const maxR = a.range * (a.type === 'sniper' ? 2 : 1.5);
+  if (d > maxR || !tbLOS(a, t, ax, az)) return null;
+  if (t.isBase) return { chance: 95, crit: 0, cover: 0, d };
+  let aim = a.acc * 100 * (a.team === ENEMY ? 0.85 : 1);
+  if (d > a.range) aim -= (d - a.range) * 3;
+  if (a.type === 'heavy' && d < 5) aim += 15;
+  if (a.type === 'sniper' && d < 4) aim -= 15;
+  const cover = coverFrom(t.x, t.z, ax, az);
+  aim -= [0, 20, 40][cover] + (t.hunker ? (cover ? 20 : 10) : 0);
+  if (overwatch) aim -= 15;
+  return { chance: Math.round(Math.max(5, Math.min(95, aim))), crit: cover ? 10 : 45 + (a.type === 'sniper' ? 15 : 0), cover, d };
+}
+function tbDamage(a) {
+  const s = TBS[a.type] || TBS.trooper;
+  const k = a.dmg / TYPES[a.type].dmg * (a.team === ENEMY && !a.elite ? TB_ALIEN_DMG : 1);
+  return Math.round((s.dmg[0] + Math.random() * (s.dmg[1] - s.dmg[0])) * k);
+}
+const pathLen = (u, path) => { let L = 0, x = u.x, z = u.z; for (const p of path) { L += Math.hypot(p.x - x, p.z - z); x = p.x; z = p.z; } return L; };
+function floatText(x, z, text, color, big = false) {
+  dmgNums.push({ x, y: 2.2, z, text, life: 1.6, crit: big, dx: 0, color });
+}
+function focusOn(x, z) { turn.focus.set(x, 0, z + (camera.aspect < 1 ? 2 : 0)); turn.focusT = 0.9; }
+
+// ---- per frame: units walk their paths, overwatch reacts to anything that moves
+function turnUnit(u, dt) {
+  u.invulnT = (u.invulnT || 0) - dt;
+  if (u.pauseT > 0) { u.pauseT -= dt; return; }
+  if (!u.path) return;
+  const sp = u.speed; u.speed *= 1.8;
+  const done = moveAlong(u, dt);
+  u.speed = sp;
+  if (u.moving) for (const w of entities) {
+    if (w.dead || !w.ow || w.team === u.team || w.isBase) continue;
+    if (Math.hypot(w.x - u.x, w.z - u.z) > w.range * 1.3) continue;
+    const info = shotInfo(w, u, w.x, w.z, true); if (!info) continue;
+    w.ow = false; u.pauseT = 0.8;
+    floatText(w.x, w.z, 'OVERWATCH', '#ffd36a', true);
+    tbShoot(w, u, { overwatch: true, cam: false });
+  }
+  if (done || u.dead) { u.path = null; if (u.moveDone) { const f = u.moveDone; u.moveDone = null; f(); } }
+}
+function tbMove(u, x, z, path) {
+  return new Promise(res => {
+    u.path = path || findPath(u.x, u.z, x, z); u.pathGoal = { x, z }; u.order = { type: 'idle' };
+    u.moveDone = res;
+    const safety = setInterval(() => { if (u.dead || !u.path) { clearInterval(safety); if (u.moveDone) { u.moveDone = null; res(); } } }, 200);
+  });
+}
+async function tbShoot(a, t, opt = {}) {
+  const info = shotInfo(a, t, a.x, a.z, opt.overwatch) || { chance: 5, crit: 0, cover: 0 };
+  a.facing = facingFor(t.x - a.x, t.z - a.z);
+  if (opt.cam !== false) setActionCam(a, t);
+  await wait(opt.cam === false ? 120 : a.team === ENEMY ? 450 : 650);
+  if (a.dead) { setActionCam(null); return; }
+  a.facing = facingFor(t.x - a.x, t.z - a.z);
+  const hit = Math.random() * 100 < info.chance, crit = hit && Math.random() * 100 < info.crit;
+  (window.__tblog = window.__tblog || []).push(`${a.team ? 'alien' : 'marine'} ${a.type} > ${t.type || 'base'} ${info.chance}% ${hit ? 'hit' : 'miss'}`);
+  let dmg = Math.round(tbDamage(a) * (crit ? 1.5 : 1) * (t.isBase ? TB_BASE_DMG : 1));
+  const n = a.type === 'trooper' || a.elite ? 3 : 1;
+  const kind = a.elite ? 'gold' : a.team === PLAYER ? 'corn' : 'seed', speed = a.type === 'sniper' ? 110 : 70;
+  const ty = t.isBase ? 1.5 : 1.0;
+  let tx = t.x, tz = t.z;
+  if (t.isBase) { const d = Math.hypot(a.x - t.x, a.z - t.z) || 1, r = t.shield ? 4.4 : 2.4; tx = t.x + (a.x - t.x) / d * r; tz = t.z + (a.z - t.z) / d * r; }
+  let landed;
+  const arrived = new Promise(r => { landed = r; });
+  for (let i = 0; i < n; i++) {
+    const m = muzzlePos(a), from = new THREE.Vector3(m.x, m.y, m.z);
+    const last = i === n - 1;
+    let to = new THREE.Vector3(tx, ty + (Math.random() - 0.5) * 0.3, tz);
+    if (!hit) { to.set(tx + (Math.random() - 0.5) * 2.6, ty + (Math.random() - 0.2) * 1.2, tz + (Math.random() - 0.5) * 2.6); to.sub(from).multiplyScalar(1.5).add(from); to.y = Math.max(0.05, to.y); }
+    shootBullet(from, to, kind, speed, last ? () => landed() : null);
+    if (a.type === 'sniper') tracer(m.x, m.y, m.z, to.x, to.y, to.z, a.team === PLAYER ? 0xfff07a : 0xffffff, 0.25);
+    a.fireT = 0.3;
+    if (a.team === PLAYER && opt.cam !== false) gunSound(a.type); else sfx(a.type === 'heavy' ? 'blast' : 'pop', a.x, a.z);
+    if (opt.cam !== false) fps.shake = Math.min(0.25, fps.shake + 0.05);
+    if (!last) await wait(a.type === 'trooper' ? 95 : 120);
+  }
+  await Promise.race([arrived, wait(900)]);
+  if (hit && !t.dead) {
+    damage(t, dmg, a);
+    floatText(t.x, t.z, crit ? `CRIT ${dmg}` : String(dmg), crit ? '#ff5a3c' : '#fff07a', crit);
+    impactPuff(new THREE.Vector3(tx, ty, tz), t.team === ENEMY ? 0x9cff3a : 0xffc080, 6);
+    if (t.dead && a.team === PLAYER) floatText(t.x, t.z + 0.01, 'KILL', '#ff8a6a', true);
+  } else if (!hit) floatText(t.x, t.z, 'MISS', '#cfd8e3', false);
+  await wait(opt.cam === false ? 250 : a.team === ENEMY ? 450 : 650);
+  if (opt.cam !== false) setActionCam(null);
+}
+// over-the-shoulder action camera for shots, eased in and out
+function setActionCam(a, t) {
+  if (mode !== 'rts') return;
+  trans = { t: 0, dur: 0.45, fromPos: camera.position.clone(), fromQuat: camera.quaternion.clone(), fromFov: camera.fov, arc: 0 };
+  turn.cam = a ? { a, t } : null;
+}
+const camLook = new THREE.Vector3();
+function actionPose() {
+  const { a, t } = turn.cam;
+  const dx = t.x - a.x, dz = t.z - a.z, d = Math.hypot(dx, dz) || 1, ux = dx / d, uz = dz / d;
+  const back = Math.min(3.2, 1.6 + d * 0.08);
+  dummy.position.set(a.x - ux * back + uz * 1.1, 2.1 + d * 0.04, a.z - uz * back - ux * 1.1);
+  camLook.set(a.x + dx * 0.7, 1.0, a.z + dz * 0.7);
+  dummy.lookAt(camLook);
+  return { pos: dummy.position.clone(), quat: dummy.quaternion.clone(), fov: 55 };
+}
+
+// ---- pods: aliens wake up when they see you, and scramble for cover
+async function tbActivate() {
+  const woke = [];
+  for (const h of tbFoes()) {
+    if (h.alert) continue;
+    if (tbMine().some(u => Math.hypot(u.x - h.x, u.z - h.z) < 15 && tbLOS(u, h)) || h.hp < h.maxHp) woke.push(h);
+  }
+  for (const h of woke.slice()) for (const o of tbFoes()) if (!o.alert && !woke.includes(o) && Math.hypot(o.x - h.x, o.z - h.z) < 7) woke.push(o);
+  if (!woke.length) return;
+  for (const h of woke) h.alert = true;
+  radio(woke.length > 1 ? `Contact! ${woke.length} aliens spotted us` : 'Contact! An alien spotted us', 'warn');
+  sfx('bawk', woke[0].x, woke[0].z);
+  focusOn(woke[0].x, woke[0].z);
+  for (const h of woke) floatText(h.x, h.z, '!', '#ff5a3c', true);
+  await wait(500);
+  await Promise.all(woke.map(h => { const s = pickSpot(h, 0.6); return s ? tbMove(h, s.x, s.z, s.path) : null; })); // the scramble
+}
+
+// ---- player turn
+function beginPlayerTurn(first = false) {
+  if (mode === 'over') return;
+  turn.side = 'player'; turn.busy = false; turn.tool = 'move'; turn.pending = null;
+  for (const u of tbMine()) { u.ap = 2; u.hunker = false; u.ow = false; }
+  showTurnBanner(first ? 'YOUR SQUAD' : 'YOUR TURN', `Turn ${turn.n}`);
+  tbSelect(tbMine()[0] || null);
+  updateButtons();
+}
+function tbSelect(u) {
+  turn.sel = u; turn.pending = null; turn.tool = 'move';
+  selection = u ? [u] : [];
+  updateButtons();
+  if (u) focusOn(u.x, u.z);
+}
+function tbNext() {
+  const mine = tbMine().filter(u => u.ap > 0);
+  if (!mine.length) { tbEndTurn(); return; }
+  const i = mine.indexOf(turn.sel);
+  tbSelect(mine[(i + 1) % mine.length]);
+}
+function tbAfterAction() {
+  turn.busy = false;
+  if (mode === 'over' || turn.side !== 'player') return;
+  if (!tbMine().length) return;
+  if (turn.sel && !turn.sel.dead && turn.sel.ap > 0) { tbSelect(turn.sel); return; }
+  const left = tbMine().filter(u => u.ap > 0);
+  if (left.length) tbSelect(left.sort((a, b) => Math.hypot(a.x - turn.sel.x, a.z - turn.sel.z) - Math.hypot(b.x - turn.sel.x, b.z - turn.sel.z))[0]);
+  else setTimeout(() => { if (turn.side === 'player' && !turn.busy && !tbMine().some(u => u.ap > 0)) tbEndTurn(); }, 700);
+}
+async function tbAct(fn) {
+  if (turn.busy || turn.side !== 'player') return;
+  turn.busy = true; turn.pending = null;
+  try { await fn(); } catch (err) { console.error(err); }
+  if (mode !== 'over') await tbActivate();
+  tbAfterAction();
+}
+function moveCost(u, x, z) {
+  if (!isFree(toCell(x), toCell(z))) return null;
+  if (entities.some(e => !e.dead && e !== u && !e.isBase && Math.hypot(e.x - x, e.z - z) < 0.9)) return null;
+  const path = findPath(u.x, u.z, x, z);
+  const L = pathLen(u, path), R = (TBS[u.type] || TBS.trooper).move;
+  const ap = L <= R ? 1 : L <= R * 2 && u.ap >= 2 ? 2 : 0;
+  return ap && ap <= u.ap ? { path, ap, L } : { path, ap: 0, L };
+}
+function coverAtSpot(x, z) { // best cover against the aliens that know about you
+  const seen = tbFoes().filter(h => h.alert);
+  if (!seen.length) return -1;
+  return Math.min(...seen.map(h => coverFrom(x, z, h.x, h.z)));
+}
+function turnTap(ent, gp, { secondary, touch }) {
+  if (turn.side !== 'player' || turn.busy) { if (turn.side !== 'player') toast('Alien turn', 0.8); return; }
+  if (secondary) { turn.pending = null; turn.tool = 'move'; return; }
+  if (!ent && gp) { // a tap near an alien counts as tapping the alien
+    let best = null, bd = 1.4;
+    for (const h of tbFoes()) { const d = Math.hypot(h.x - gp.x, h.z - gp.z); if (d < bd) { bd = d; best = h; } }
+    ent = best;
+  }
+  const u = turn.sel;
+  if (ent && ent.team === PLAYER && !ent.isBase && !ent.isTower) { tbSelect(ent); return; }
+  if (!u || u.dead) { toast('Pick a marine first', 1); return; }
+  if (u.ap <= 0) { toast(`${u.callsign || nameOf(u)} is done this turn`, 1); return; }
+  if (turn.tool === 'grenade') {
+    if (!gp) return;
+    if (Math.hypot(gp.x - u.x, gp.z - u.z) > 11) { toast('Too far to throw', 1); return; }
+    const p = turn.pending;
+    if (touch && !(p && p.kind === 'gren' && Math.hypot(p.x - gp.x, p.z - gp.z) < 1.5)) { turn.pending = { kind: 'gren', x: gp.x, z: gp.z }; return; }
+    tbAct(async () => {
+      u.ap = 0; u.gren--; turn.tool = 'move';
+      setActionCam(u, { x: gp.x, z: gp.z });
+      await wait(400);
+      lobEgg(u, gp.x, gp.z, 0.9, 3.4, 45);
+      sfx('pop', u.x, u.z);
+      await wait(1700);
+      setActionCam(null);
+    });
+    return;
+  }
+  if (ent && (ent.team === ENEMY || ent.isBase && ent.team === ENEMY)) {
+    const info = shotInfo(u, ent);
+    if (!info) { toast(ent.isBase ? 'No clear shot at the hive from here' : 'No line of sight, or out of range', 1.2); return; }
+    const p = turn.pending;
+    if (!(p && p.kind === 'shot' && p.t === ent)) { turn.pending = { kind: 'shot', t: ent, info }; return; } // first tap: show the odds
+    tbAct(async () => { u.ap = 0; await tbShoot(u, ent); });
+    return;
+  }
+  if (!gp) return;
+  const mc = moveCost(u, gp.x, gp.z);
+  if (!mc) { toast('Can\'t stand there', 0.8); return; }
+  if (!mc.ap) { toast(u.ap >= 2 ? 'Too far, even dashing' : 'Too far for one action', 1); return; }
+  const p = turn.pending;
+  if (touch && !(p && p.kind === 'move' && Math.hypot(p.x - gp.x, p.z - gp.z) < 1.2)) { turn.pending = { kind: 'move', x: gp.x, z: gp.z, ...mc }; return; }
+  tbAct(async () => { u.ap -= mc.ap; await tbMove(u, gp.x, gp.z, mc.path); });
+}
+function tbOverwatch() {
+  const u = turn.sel; if (!u || u.ap <= 0 || turn.busy || turn.side !== 'player') return;
+  u.ow = true; u.ap = 0; floatText(u.x, u.z, 'OVERWATCH', '#ffd36a', true); sfx('chime');
+  tbAfterAction();
+}
+function tbHunker() {
+  const u = turn.sel; if (!u || u.ap <= 0 || turn.busy || turn.side !== 'player') return;
+  u.hunker = true; u.ap = 0; floatText(u.x, u.z, 'HUNKER DOWN', '#7fe0ff', true);
+  tbAfterAction();
+}
+function tbGrenadeTool() {
+  const u = turn.sel; if (!u || u.ap <= 0 || turn.side !== 'player') return;
+  if (u.type !== 'trooper') { toast('Only marines carry frag grenades', 1); return; }
+  if (!u.gren) { toast('No grenades left', 1); return; }
+  turn.tool = turn.tool === 'grenade' ? 'move' : 'grenade'; turn.pending = null;
+  if (turn.tool === 'grenade') toast(isTouch ? 'Tap where it lands, tap again to throw' : 'Click where it lands', 1.4);
+}
+
+// ---- alien turn
+async function tbEndTurn() {
+  if (turn.side !== 'player' || turn.busy || mode === 'over') return;
+  turn.side = 'enemy'; turn.busy = true; turn.pending = null; turn.sel = null; selection = []; updateButtons();
+  tbRelays();
+  showTurnBanner('ALIEN TURN', 'The swarm moves');
+  await wait(1100);
+  tbReinforce();
+  await tbActivate();
+  for (const h of tbFoes()) h.ow = false;
+  const acting = tbFoes().filter(h => h.alert).sort((a, b) => nearestDist(a) - nearestDist(b));
+  for (const h of acting) {
+    if (mode === 'over' || !tbMine().length) break;
+    if (h.dead) continue;
+    await alienAct(h);
+  }
+  if (mode === 'over') return;
+  for (const l of loot) l.life -= 10; // loot left on the field fades after three turns
+  turn.n++;
+  if (story.def) {
+    story.turns = (story.turns || 0) + 1;
+    for (const [n, fn] of story.later || []) if (n === story.turns) fn();
+  }
+  if (!tbMine().length) { if (!(camp.m && camp.m.story) && game.cp < COSTS.trooper) endGame(false, 'The squad was wiped out.'); else if (!(camp.m && camp.m.story)) { beginPlayerTurn(); return; } return; }
+  beginPlayerTurn();
+}
+const nearestDist = h => Math.min(...tbMine().map(u => Math.hypot(u.x - h.x, u.z - h.z)), 99);
+function tbTargets(h) {
+  const list = tbMine();
+  for (const e of entities) if (!e.dead && e.team === PLAYER && (e.isBase || e.isTower)) list.push(e);
+  return list;
+}
+function bestShot(h, x, z) {
+  let best = null;
+  for (const t of tbTargets(h)) {
+    const info = shotInfo(h, t, x, z); if (!info) continue;
+    const score = info.chance * (t.isBase ? 0.5 : 1) * (t.hp < tbDamage(h) * 1.2 ? 1.3 : 1);
+    if (!best || score > best.score) best = { t, info, score };
+  }
+  return best;
+}
+function pickSpot(h, scale = 1) {
+  const R = (TBS[h.type] || TBS.trooper).move * scale;
+  const tg = tbTargets(h);
+  if (!tg.length) return null;
+  const goal = tg.slice().sort((a, b) => Math.hypot(a.x - h.x, a.z - h.z) - Math.hypot(b.x - h.x, b.z - h.z))[0];
+  const gd0 = Math.hypot(goal.x - h.x, goal.z - h.z);
+  let best = null;
+  for (let k = 0; k < 20; k++) for (const f of [0.35, 0.7, 1]) {
+    const a = k / 20 * Math.PI * 2 + h.x, x = h.x + Math.cos(a) * R * f, z = h.z + Math.sin(a) * R * f;
+    if (Math.abs(x) > HALF - 1 || Math.abs(z) > HALF - 1) continue;
+    if (!isFree(toCell(x), toCell(z))) continue;
+    if (entities.some(e => !e.dead && e !== h && !e.isBase && Math.hypot(e.x - x, e.z - z) < 1.1)) continue;
+    const gd = Math.hypot(goal.x - x, goal.z - z);
+    let s = (gd0 - gd) / R * (h.elite ? 1.4 : 0.8); // close in
+    const shot = bestShot(h, x, z);
+    if (shot) s += shot.info.chance / 100 * 2 + (shot.info.cover === 0 ? 0.6 : 0);
+    const mine = tbMine().filter(u => Math.hypot(u.x - x, u.z - z) < 22);
+    if (mine.length) s += Math.min(...mine.map(u => coverFrom(x, z, u.x, u.z))) * 0.55; // stay in cover
+    if (h.type === 'sniper' && gd < 7) s -= 1;
+    s += Math.random() * 0.25;
+    if (!best || s > best.s) best = { x, z, s };
+  }
+  if (!best) return null;
+  const path = findPath(h.x, h.z, best.x, best.z);
+  if (pathLen(h, path) > R * 1.35) { // walls in the way: walk part of the way along the path instead
+    let L = 0, x = h.x, z = h.z; const cut = [];
+    for (const p of path) { const seg = Math.hypot(p.x - x, p.z - z); if (L + seg > R) { const k = (R - L) / seg; cut.push({ x: x + (p.x - x) * k, z: z + (p.z - z) * k }); break; } cut.push(p); L += seg; x = p.x; z = p.z; }
+    const end = cut[cut.length - 1];
+    return end ? { x: end.x, z: end.z, path: cut } : null;
+  }
+  return { ...best, path };
+}
+async function alienAct(h) {
+  h.ap = 2;
+  focusOn(h.x, h.z);
+  await wait(200);
+  while (h.ap > 0 && !h.dead && mode !== 'over' && tbMine().length) {
+    const shot = bestShot(h, h.x, h.z);
+    if (shot && (shot.info.chance >= 45 || (h.ap === 1 && shot.info.chance >= 15))) { h.ap = 0; await tbShoot(h, shot.t); break; }
+    if (h.ap === 1 && h.type === 'sniper') { h.ap = 0; h.ow = true; floatText(h.x, h.z, 'OVERWATCH', '#ff8a6a', true); await wait(400); break; }
+    const spot = pickSpot(h);
+    if (!spot) { if (shot) { h.ap = 0; await tbShoot(h, shot.t); } break; }
+    h.ap--;
+    focusOn(spot.x, spot.z);
+    await tbMove(h, spot.x, spot.z, spot.path);
+    await wait(150);
+  }
+  h.ap = 0;
+}
+// relays: a marine (and no alien) standing on one at the end of your turn captures it over two turns
+function tbRelays() {
+  for (const p of points) {
+    const inside = e => Math.hypot(e.x - p.x, e.z - p.z) < POINT_R;
+    const mine = tbMine().filter(inside).length, foes = tbFoes().filter(inside).length;
+    if (mine && !foes) p.prog = Math.min(1, p.prog + 0.5);
+    else if (foes && !mine) p.prog = Math.max(-1, p.prog - 0.5);
+    if (mine && !foes) floatText(p.x, p.z, `Relay ${Math.round(Math.max(0, p.prog) * 100)}%`, '#7fe0ff', true);
+  }
+  updatePoints(0);
+}
+// arena missions: the hive sends more aliens between turns
+function tbReinforce() {
+  const m = camp.m; if (!m || m.story) return;
+  const rule = m.tb || {};
+  const alive = tbFoes().length;
+  if (rule.tyrantAt && turn.n === rule.tyrantAt && !entities.some(e => e.elite && !e.dead)) {
+    const t = makeUnit(ENEMY, 'elite', 0, -20); t.alert = true; smoke(0, 0.5, -20, 3, 8);
+    radio('The Hive Tyrant is out of the hive!', 'warn'); twistBanner('THE TYRANT');
+  }
+  if (rule.tyrantEvery && turn.n % rule.tyrantEvery === 0 && !entities.some(e => e.elite && !e.dead)) {
+    const t = makeUnit(ENEMY, 'elite', 0, -20); t.alert = true; radio('The Hive Tyrant joins the fight', 'warn');
+  }
+  if (!(turn.n % (rule.every || 1) === 0)) return;
+  const n = Math.min((rule.spawn || 2) + (turn.n >= 5 ? 1 : 0), 12 - alive);
+  for (let i = 0; i < n; i++) {
+    const type = i % 4 === 3 ? 'sniper' : i % 3 === 2 ? 'heavy' : 'trooper';
+    const x = (Math.random() - 0.5) * 16, z = -20 - Math.random() * 2;
+    const h = makeUnit(ENEMY, type, x, z); h.alert = true;
+    smoke(x, 0.4, z, 1.4, 4);
+  }
+  if (n > 0) radio(`${n} more aliens pour out of the hive`, 'warn');
+}
+function showTurnBanner(title, sub) {
+  const b = $('turnBanner'); if (!b) return;
+  b.innerHTML = `<b>${title}</b><small>${sub}</small>`;
+  b.className = turn.side === 'enemy' ? 'enemy' : '';
+  void b.offsetWidth; b.classList.add('show');
+}
+function turnTick(dt) {
+  if (turn.focusT > 0) { turn.focusT -= dt; rts.focus.lerp(turn.focus, Math.min(1, dt * 4)); }
+  if (!turn.cam && trans === null && camera.aspect < 1) rts.zoom = Math.max(rts.zoom, 34);
+  const tag = $('modeTag');
+  tag.innerHTML = turn.side === 'player' ? `<b>YOUR TURN</b> ${turn.n}` : '<b>ALIEN TURN</b>';
+  tag.className = turn.side === 'player' ? 'plan' : 'op';
+  const u = turn.sel;
+  const can = turn.side === 'player' && !turn.busy && u && !u.dead && u.ap > 0;
+  $('btnOW').classList.toggle('off', !can);
+  $('btnHunker').classList.toggle('off', !can);
+  $('btnTGren').classList.toggle('off', !can || u.type !== 'trooper' || !u.gren);
+  $('btnTGren').classList.toggle('armed', turn.tool === 'grenade');
+  $('btnEndTurn').classList.toggle('off', turn.side !== 'player' || turn.busy);
+  setLabel('btnTGren', u && u.type === 'trooper' ? `Grenade · ${u.gren || 0}` : 'Grenade');
+  if (u && !u.dead) $('selInfo').textContent = `${u.callsign || nameOf(u)} · ${'●'.repeat(Math.max(0, u.ap))}${'○'.repeat(Math.max(0, 2 - u.ap))} · ${Math.ceil(u.hp)}/${u.maxHp} hp`;
+  else if (turn.side === 'enemy') $('selInfo').textContent = 'The swarm is moving…';
+}
+
+// ---- drawing: move range, path preview with cover, hit chances, action points
+function drawTurnUI() {
+  if (mode !== 'rts' || turn.cam) return;
+  const u = turn.sel;
+  const proj = (x, z) => toScreen(x, 0.1, z);
+  // every marine: action point pips, overwatch and hunker icons
+  octx.textAlign = 'center';
+  for (const m of tbMine()) {
+    const s = toScreen(m.x, 2.45, m.z); if (s.behind) continue;
+    octx.font = '900 12px system-ui'; octx.lineWidth = 3; octx.strokeStyle = 'rgba(0,0,0,.7)';
+    const tag = (m.ow ? '👁 ' : '') + (m.hunker ? '🛡 ' : '') + (turn.side === 'player' ? '●'.repeat(Math.max(0, m.ap)) + '○'.repeat(Math.max(0, 2 - m.ap)) : '');
+    octx.strokeText(tag, s.x, s.y); octx.fillStyle = m === u ? '#9dffc4' : '#cfe8ff'; octx.fillText(tag, s.x, s.y);
+  }
+  for (const h of tbFoes()) {
+    if (!h.ow) continue;
+    const s = toScreen(h.x, 2.4, h.z); if (s.behind) continue;
+    octx.font = '900 12px system-ui'; octx.fillStyle = '#ff8a6a';
+    octx.fillText('👁 OVERWATCH', s.x, s.y);
+  }
+  if (turn.side !== 'player' || !u || u.dead) return;
+  // move range: blue for one action, yellow for a dash
+  const R = (TBS[u.type] || TBS.trooper).move;
+  if (u.ap > 0 && turn.tool === 'move') {
+    octx.lineWidth = 2;
+    groundCircle(u.x, u.z, R, 48); octx.strokeStyle = 'rgba(90,190,255,.75)'; octx.fillStyle = 'rgba(90,190,255,.07)'; octx.fill(); octx.stroke();
+    if (u.ap >= 2) { octx.setLineDash([7, 6]); groundCircle(u.x, u.z, R * 2, 64); octx.strokeStyle = 'rgba(255,210,90,.6)'; octx.stroke(); octx.setLineDash([]); }
+  }
+  // hit chances on every alien this marine can shoot
+  for (const h of tbFoes().concat(enemyBase && !enemyBase.dead ? [enemyBase] : [])) {
+    if (u.ap <= 0) break;
+    const info = shotInfo(u, h); if (!info) continue;
+    const s = toScreen(h.x, h.isBase ? 6 : 2.7, h.z); if (s.behind) continue;
+    const sel = turn.pending && turn.pending.t === h;
+    label(s.x, s.y, `${info.chance}%${info.cover === 0 && !h.isBase ? ' · FLANKED' : info.cover === 1 ? ' · ◐' : info.cover === 2 ? ' · ●' : ''}`, sel ? '#ffffff' : info.chance >= 65 ? '#9dffc4' : info.chance >= 40 ? '#ffd36a' : '#ff9a8a');
+  }
+  // the preview: hover on desktop, the first tap on phones
+  let pv = turn.pending;
+  if (!pv && turn.hover && !isTouch && turn.tool === 'move') {
+    const gp = groundPoint(turn.hover.x, turn.hover.y);
+    if (gp) {
+      const key = `${toCell(gp.x)},${toCell(gp.z)}`;
+      if (key !== turn.hoverKey) { turn.hoverKey = key; turn.hoverMc = moveCost(u, gp.x, gp.z); turn.hoverAt = gp; }
+      if (turn.hoverMc) pv = { kind: 'move', x: turn.hoverAt.x, z: turn.hoverAt.z, ...turn.hoverMc };
+    }
+  }
+  if (turn.tool === 'grenade') {
+    const g = pv && pv.kind === 'gren' ? pv : turn.hover && !isTouch ? groundPoint(turn.hover.x, turn.hover.y) : null;
+    octx.setLineDash([5, 5]); groundCircle(u.x, u.z, 11, 48); octx.strokeStyle = 'rgba(255,170,85,.6)'; octx.stroke(); octx.setLineDash([]);
+    if (g) {
+      groundCircle(g.x, g.z, 3.4, 32); octx.fillStyle = 'rgba(255,140,60,.18)'; octx.strokeStyle = '#ffaa55'; octx.fill(); octx.stroke();
+      const n = tbFoes().filter(h => Math.hypot(h.x - g.x, h.z - g.z) < 3.4).length;
+      const c = proj(g.x, g.z); label(c.x, c.y - 30, `Frag · ${n} in blast${isTouch ? ' · tap again' : ''}`, '#ffcf9a');
+    }
+    return;
+  }
+  if (pv && pv.kind === 'shot') {
+    const a = proj(u.x, u.z), b = proj(pv.t.x, pv.t.z);
+    octx.strokeStyle = '#ff6a5a'; octx.lineWidth = 2; octx.setLineDash([4, 5]); octx.beginPath(); octx.moveTo(a.x, a.y); octx.lineTo(b.x, b.y); octx.stroke(); octx.setLineDash([]);
+    const i = pv.info, dmg = TBS[u.type] || TBS.trooper, k = u.dmg / TYPES[u.type].dmg * (pv.t.isBase ? TB_BASE_DMG : 1);
+    label(b.x, b.y + 34, `Shoot · ${i.chance}% hit · ${i.crit}% crit · ${Math.round(dmg.dmg[0] * k)}-${Math.round(dmg.dmg[1] * k)} dmg · ${isTouch ? 'tap again' : 'click again'}`, '#ffd0c8');
+    return;
+  }
+  if (pv && pv.kind === 'move') {
+    const a = proj(u.x, u.z);
+    const ok = pv.ap > 0, col = !ok ? '#ff7a6a' : pv.ap === 2 ? '#ffd36a' : '#7fd0ff';
+    octx.strokeStyle = col; octx.lineWidth = 2.5; octx.setLineDash([6, 6]);
+    octx.beginPath(); octx.moveTo(a.x, a.y); for (const p of pv.path) { const q = proj(p.x, p.z); octx.lineTo(q.x, q.y); } octx.stroke(); octx.setLineDash([]);
+    groundCircle(pv.x, pv.z, 0.55, 20); octx.fillStyle = col + '55'; octx.fill(); octx.stroke();
+    const cov = coverAtSpot(pv.x, pv.z);
+    const c = proj(pv.x, pv.z);
+    const txt = !ok ? 'Too far' : `${pv.ap === 2 ? 'Dash' : 'Move'}${cov === 2 ? ' · ● full cover' : cov === 1 ? ' · ◐ half cover' : cov === 0 ? ' · ⚠ no cover' : ''}${isTouch ? ' · tap again' : ''}`;
+    label(c.x, c.y - 30, txt, cov === 0 ? '#ffb4a0' : col);
+    // shields on the sides that would protect you there
+    if (ok) for (const h of tbFoes().filter(f => f.alert)) {
+      const cv = coverFrom(pv.x, pv.z, h.x, h.z); if (!cv) continue;
+      const d = Math.hypot(h.x - pv.x, h.z - pv.z) || 1, q = toScreen(pv.x + (h.x - pv.x) / d * 0.9, 0.9, pv.z + (h.z - pv.z) / d * 0.9);
+      octx.font = '900 16px system-ui'; octx.fillStyle = cv === 2 ? '#7fd0ff' : '#cfe8ff'; octx.fillText(cv === 2 ? '⛊' : '◐', q.x, q.y);
+    }
+  }
+}
+canvas.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') turn.hover = { x: e.clientX, y: e.clientY }; });
+tapButton($('btnOW'), tbOverwatch);
+tapButton($('btnHunker'), tbHunker);
+tapButton($('btnTGren'), tbGrenadeTool);
+tapButton($('btnTNext'), tbNext);
+tapButton($('btnEndTurn'), () => tbEndTurn());
+function turnKey(code) {
+  if (code === 'Enter' || code === 'Backspace') tbEndTurn();
+  else if (code === 'KeyO' || code === 'KeyY') tbOverwatch();
+  else if (code === 'KeyH') tbHunker();
+  else if (code === 'KeyG') tbGrenadeTool();
+  else if (code === 'Tab' || code === 'KeyN') tbNext();
+  else if (code === 'Escape') { turn.pending = null; turn.tool = 'move'; }
+  else if (code === 'Digit1') buy('trooper');
+  else if (code === 'Digit2') buy('heavy');
+  else if (code === 'Digit3') buy('sniper');
+}
+
 // ---------------------------------------------------------------- campaign: five missions across the Kepler sector, with a squad that remembers
 // Marines have names, earn rank from kills and missions, and a marine who falls in a mission is gone for good.
 // Everything lives in localStorage; the page reloads between missions so each one starts from a clean world.
@@ -3655,20 +4187,20 @@ const MISSIONS = [
     twist: 'Story mission with checkpoints: if your squad is wiped out, you restart from the last one. Ore buys reinforcements, dropped at your last checkpoint.',
     brief: 'The colony went dark three days ago. On approach, something hit our dropship. We are going down in the canyons, miles from anywhere.' },
   { id: 'holdline', name: 'Hold the Line', where: 'Refinery approach', kind: 'tactics', squad: 6, ore: 80,
-    goal: { type: 'rounds', n: 6 }, goalText: 'Keep the outpost standing for 6 rounds',
-    twist: 'Swarm surge: two extra aliens every round', surge: 2, tyrantEvery: 99,
+    goal: { type: 'rounds', n: 6 }, goalText: 'Hold the outpost for 6 turns',
+    twist: 'Swarm surge: more aliens every turn', surge: 2, tyrantEvery: 99, tb: { turns: 6, spawn: 3, every: 1 },
     brief: 'The refinery crews are evacuating through our outpost. Buy them six rounds. Turrets are your friend.' },
   { id: 'hunt', name: 'Tyrant Hunt', where: 'Crashed freighter', kind: 'live', squad: 5, ore: 60,
     goal: { type: 'tyrant' }, goalText: 'Kill the Hive Tyrant',
-    twist: 'The Tyrant comes out after 45 seconds, with 50% more health', waveMul: 1.2, firstWave: 20, tyrantAt: 45, tyrantHp: 1.5,
+    twist: 'The Tyrant comes out on turn 3, with 50% more health', waveMul: 1.2, firstWave: 20, tyrantAt: 45, tyrantHp: 1.5, tb: { spawn: 2, every: 2, tyrantAt: 3 },
     brief: 'Something big is directing the swarm. Draw it out and put it down. Drop in and fight it yourself if you have to.' },
   { id: 'blackout', name: 'Blackout', where: 'Habitat domes', kind: 'live', squad: 6, ore: 60,
-    goal: { type: 'time', t: 180 }, goalText: 'Survive for 3 minutes',
+    goal: { type: 'time', t: 180 }, goalText: 'Survive for 8 turns', tb: { turns: 8, spawn: 2, every: 1 },
     twist: 'Dust storm: you can barely see past your squad', fog: [6, 34], waveMul: 0.85, firstWave: 12, tyrantAt: 120,
     brief: 'A storm is rolling over the domes and the swarm moves with it. Hold the outpost until the dropship can land.' },
   { id: 'hivefall', name: 'Hivefall', where: 'The main hive', kind: 'tactics', squad: 6, ore: 120,
     goal: { type: 'hive' }, goalText: 'Break the bio-shield and destroy the hive',
-    twist: 'The Hive Tyrant joins the fight every 3 rounds', surge: 1, tyrantEvery: 3,
+    twist: 'The Hive Tyrant joins the fight every 4 turns', surge: 1, tyrantEvery: 3, tb: { spawn: 2, every: 2, tyrantEvery: 4 },
     brief: 'This is it. Hold the relays, drop the shield and burn the hive. Bring your best marines home.' },
 ];
 const SURNAMES = ['Reyes', 'Okafor', 'Lindqvist', 'Tanaka', 'Moreau', 'Brandt', 'Kowalski', 'Haddad', 'Nakamura', 'Petrov', 'Mbeki', 'Silva',
@@ -3750,7 +4282,7 @@ function renderCampaign() {
     <p class="brief">${m.brief}</p>
     <p class="goal"><b>🎯 ${m.goalText}</b></p>
     <p class="twist">⚠ ${m.twist}</p>
-    <p class="kind">${m.kind === 'tactics' ? 'Tactics: plan with the battle paused, then 20-second live rounds' : 'Live battle: real time, drop in any time'} · start with 💠 ${m.ore}</p>
+    <p class="kind">Turn-based: 2 actions per marine, cover, flanking and overwatch, then the swarm moves · start with 💠 ${m.ore}</p>
     <h3>Squad <small>${campPick.length} / ${m.squad} deployed · tap to swap</small></h3>
     <div class="roster">${active.map(row).join('')}</div>
     ${fallen.length ? `<p class="fallen">Fallen: ${fallen.map(r => `${callsign(r)} (${r.diedIn})`).join(' · ')}</p>` : ''}`;
@@ -3806,11 +4338,14 @@ function launchMission(i, pick, checkpoint = 0) {
     camp.deployed.push(u);
   });
   if (m.fog) { scene.traverse(o => { if (o.material === skyMat) o.visible = false; }); scene.fog.near = m.fog[0]; scene.fog.far = m.fog[1]; scene.background.setHex(0x8a6a58); scene.fog.color.setHex(0x8a6a58); }
-  if (m.kind === 'tactics') { startTactics(); game.cp = m.ore; }
-  else {
-    game.cp = m.ore; waveTimer = m.firstWave || 16; eliteTimer = m.tyrantAt || 100;
-    startGame();
+  // every campaign mission is turn-based: arena missions start with a pack of aliens already coming for you
+  if (!m.story) {
+    for (const e of entities) if (e.team === ENEMY && !e.isBase) { e.dead = true; scene.remove(e.mesh); }
+    entities = entities.filter(e => !e.dead);
+    for (const [t, x, z] of [['trooper', -14, -15], ['trooper', 14, -15], ['trooper', -4, -13], ['trooper', 4, -13], ['heavy', -9, -18], ['heavy', 9, -18], ['sniper', -2, -20], ['sniper', 2, -20]]) makeUnit(ENEMY, t, x, z).alert = true;
   }
+  game.cp = m.ore;
+  startTurns();
   if (m.story) { storyStart(checkpoint); return; }
   setTimeout(() => radio(`Mission ${i + 1}: ${m.name}. ${m.goalText}.`, 'good'), m.kind === 'tactics' ? 3200 : 2600);
 }
@@ -3836,6 +4371,8 @@ function campaignTick(dt) {
   const g = m.goal;
   if (g.type === 'story') storyTick(dt);
   if (g.type === 'relays' && points.every(p => p.owner === PLAYER)) campaignWin('All three relays are ours. The fleet has a signal.');
+  if (turn.on && (g.type === 'time' || g.type === 'rounds') && turn.side === 'player' && turn.n > m.tb.turns) campaignWin(g.type === 'time' ? 'The storm passes and the dropship lands. Outpost held.' : `The refinery crews are out. ${m.tb.turns} turns held.`);
+  if (turn.on) return;
   if (g.type === 'time' && camp.t >= g.t) campaignWin('The storm passes and the dropship lands. Outpost held.');
   if (g.type === 'rounds' && tac.on && tac.phase === 'plan' && tac.round > g.n) campaignWin(`The refinery crews are out. ${g.n} rounds held.`);
 }
@@ -3849,6 +4386,8 @@ function campaignObjective() {
   if (g.type === 'tyrant') txt = entities.some(e => e.elite && !e.dead) ? 'Kill the Tyrant!' : `Tyrant in ${Math.max(0, Math.ceil(eliteTimer))}s`;
   if (g.type === 'hive') txt = enemyBase.shield ? 'Drop the shield' : 'Destroy the hive!';
   if (g.type === 'story') txt = storyGoal();
+  if (turn.on && (g.type === 'time' || g.type === 'rounds')) txt = `Hold out: turn ${Math.min(turn.n, m.tb.turns)}/${m.tb.turns}`;
+  if (turn.on && g.type === 'tyrant' && !entities.some(e => e.elite && !e.dead)) txt = `Tyrant arrives on turn ${m.tb.tyrantAt}`;
   return `<span class="chip obj">🎯 ${txt}</span>`;
 }
 function campaignWin(text) { if (!camp.done) endGame(true, text); }
@@ -3926,10 +4465,10 @@ const STORIES = {
           ['Sgt', 'You heard her. Move up to the relay, double time.']]);
         foes([['trooper', 19, -13], ['trooper', 17, -16], ['sniper', 8, -19], ['trooper', -6, -18]], 'idle');
       } },
-    { name: 'The relay', cp: [12, -13], relay: 0.35, goal: 'Drop in and reboot the relay: stand on it', marker: 'relay',
+    { name: 'The relay', cp: [12, -13], relay: 0.35, goal: 'Reboot the relay: end a turn with a marine on it', marker: 'relay',
       run() {
         say([['Command', 'Checkpoint Charlie. Saved.'], ['Sgt', 'Nobody here. Where is Brecht?'],
-          ['Command', 'Reboot the relay so the fleet can find you. Someone has to drop in and stand on it.']]);
+          ['Command', 'Reboot the relay so the fleet can find you. Someone has to stand on it.']]);
       } },
     { name: 'Ambush', twist: true, survive: 45, goal: 'Survive until the relay is back online', marker: 'relay',
       run() {
@@ -3939,7 +4478,8 @@ const STORIES = {
         const ring = [[15, -14], [16, -19], [10, -21], [-6, -21], [-11, -18], [-11, -12], [-5, -11], [9, -11], [13, -11], [19, -11], [4, -21]]
           .map(([x, z], k) => [k % 4 === 3 ? 'sniper' : k % 5 === 2 ? 'heavy' : 'trooper', x, z]);
         setTimeout(() => { for (const [, x, z] of ring) smoke(x, 0.5, z, 2, 6); foes(ring, 'hunt'); }, 1800);
-        setTimeout(() => { if (!camp.done) { say([['Command', 'Something big is coming out of the hive. Hold on!']]); foes([['elite', 0, -24]], 'hunt'); } }, 22000);
+        const tyrant = () => { if (!camp.done) { say([['Command', 'Something big is coming out of the hive. Hold on!']]); foes([['elite', 0, -24]], 'hunt'); } };
+        if (turn.on) story.later.push([2, tyrant]); else setTimeout(tyrant, 22000);
       } },
   ],
 };
@@ -3955,7 +4495,7 @@ function storyStart(checkpoint) {
   storyStep(checkpoint);
 }
 function storyStep(i) {
-  story.step = i; story.t = 0; story.queue = []; story.sayT = 0; // stale lines from the last step are dropped
+  story.step = i; story.t = 0; story.turns = 0; story.later = []; story.queue = []; story.sayT = 0; // stale lines from the last step are dropped
   const st = story.def[i];
   if (st.cp && i > 0) story.checkpoint = i; // reaching a step with a checkpoint saves it
   st.run();
@@ -3969,6 +4509,7 @@ function storyMarker() {
 function storyGoal() {
   if (!story.def || story.step < 0) return '';
   const st = story.def[story.step];
+  if (st.survive && turn.on) { const n = Math.max(0, tbSurvive(st) - (story.turns || 0)); return `${st.goal}: ${n} turn${n === 1 ? '' : 's'}`; }
   if (st.survive) return `${st.goal}: ${Math.max(0, Math.ceil(st.survive - story.t))}s`;
   if (st.relay) return `${st.goal} (${Math.round(Math.max(0, points[0].prog) / st.relay * 100)}%)`;
   return st.goal;
@@ -3989,7 +4530,7 @@ function storyTick(dt) {
     done = near && (!st.clear || !entities.some(e => !e.dead && e.team === ENEMY && !e.isBase && Math.hypot(e.x - st.at[0], e.z - st.at[1]) < st.clear));
   }
   if (st.relay) done = points[0].prog >= st.relay;
-  if (st.survive) done = story.t >= st.survive;
+  if (st.survive) done = turn.on ? (story.turns || 0) >= tbSurvive(st) && turn.side === 'player' : story.t >= st.survive;
   if (!done) return;
   if (story.step + 1 < story.def.length) storyStep(story.step + 1);
   else campaignWin('The relay is up. The fleet is coming, and now they know: the hive is smart enough to set traps.');
@@ -4002,7 +4543,8 @@ function foes(list, how) {
   const out = [];
   for (const [t, x, z] of list) {
     const u = makeUnit(ENEMY, t, x, z);
-    if (how === 'hunt') { const tgt = possessed || playerUnits()[0]; if (tgt) commandMove([u], tgt.x, tgt.z, 'amove', true); }
+    if (turn.on) { if (how === 'hunt') u.alert = true; }
+    else if (how === 'hunt') { const tgt = possessed || playerUnits()[0]; if (tgt) commandMove([u], tgt.x, tgt.z, 'amove', true); }
     out.push(u);
   }
   return out;
@@ -4200,6 +4742,7 @@ function frame(now) {
   updateCamera(dt);
   if (window.__camOverride) window.__camOverride(camera);
   if (camp.m) campaignTick(dt);
+  if (turn.on && mode === 'rts') turnTick(dt);
   if (mode !== 'menu') updateHud(dt); else if (toastTimer > 0) toastTimer -= dt;
   renderFrame(dt);
   drawOverlay();
@@ -4215,5 +4758,5 @@ window.__game = {
   get possessed() { return possessed; }, get enemyBase() { return enemyBase; }, points,
   game, fps, possess, exitFPS, startGame, commandMove, buy, useAbility, dropInNear, damage,
   setEliteTimer: t => { eliteTimer = t; }, setWaveTimer: t => { waveTimer = t; },
-  loot, scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
+  turn, tbEndTurn, turnTap, shotInfo, tbOverwatch, tbGrenadeTool, tbMove, pickSpot, bestShot, tbLOS, coverFrom, alienAct, findPath, boxes, loot, scene, camera, simulate, makeUnit, tac, goLive, startTactics, toScreen, useUlt, wall, hawk, ducklings, buy, upgradeSelected, placeTower,
 };

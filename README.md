@@ -29,19 +29,32 @@ One loop: **hold the relays, drop the shield, destroy the hive.**
 
 ## Campaign
 
-**Campaign** on the menu opens the Kepler sector map: five missions, unlocked in order, each with its own goal and twist.
+**Campaign** on the menu opens the Kepler sector map: five missions, unlocked in order, each with its own goal and twist. **The campaign is turn-based on both sides**, played from the command view.
 
-| # | Mission | Mode | Goal | Twist |
-|---|---|---|---|---|
-| 1 | Crash Site (story) | Live | Fight through the canyons to the colony relay | Its own map, checkpoints, scripted radio and a plot twist |
-| 2 | Hold the Line | Tactics | Keep the outpost standing for 6 rounds | Two extra aliens every round |
-| 3 | Tyrant Hunt | Live | Kill the Hive Tyrant | It comes out at 45s with 50% more health |
-| 4 | Blackout | Live | Survive 3 minutes | Dust storm: very short sight lines |
-| 5 | Hivefall | Tactics | Destroy the hive | The Tyrant every 3 rounds |
+| # | Mission | Goal | Twist |
+|---|---|---|---|
+| 1 | Crash Site (story) | Fight through the canyons to the colony relay | Its own map, checkpoints, scripted radio and a plot twist |
+| 2 | Hold the Line | Hold the outpost for 6 turns | More aliens every turn |
+| 3 | Tyrant Hunt | Kill the Hive Tyrant | It comes out on turn 3 with 50% more health |
+| 4 | Blackout | Survive 8 turns | Dust storm: very short sight lines |
+| 5 | Hivefall | Destroy the hive | The Tyrant every 4 turns |
+
+### Turns
+
+- **Your turn:** each marine has **2 actions**. Move inside the blue ring (1 action) or dash to the yellow ring (2). Shooting, **Overwatch**, **Hunker down** and **Grenade** end that marine's turn, so move first, then act.
+- **Hit chance** comes from the marine's aim, range and the target's **cover**: half cover (low barriers, ◐) −20%, full cover (containers, huts, rock, ●) −40%. Cover only counts on the side facing the shooter, so get around it: a target with no cover is **flanked** and much easier to crit. Hover (or tap once) on a spot to see the path and the cover you would have there; tap an alien once to see the odds, again to fire.
+- **Overwatch** shoots the first alien that moves in range during their turn (at −15% aim). **Hunker down** makes a marine much harder to hit until your next turn. Marines carry one frag grenade per mission: it always hits everything in the blast.
+- **Alien turn:** aliens sit still until they see you, then the whole pack wakes up and scrambles for cover. On their turn each one moves toward you, looks for cover and flanks, and shoots when the odds are good. Their spitters set up overwatch too.
+- Relays and the story relay are captured by ending turns with a marine on them. Ore buys reinforcements during your turn. Loot left on the ground fades after three turns.
+- The shot camera cuts over the shooter's shoulder for every shot.
 
 Story missions build their own map (canyon walls, camps) and run a script of objectives. Each checkpoint you reach is saved: if the squad is wiped out you restart from it with the same marines, and nobody is lost on a failed attempt. Ore buys reinforcements, which a dropship drops at your last checkpoint.
 
 Your squad persists between missions. Every marine has a name and earns XP from kills and missions: Private → Corporal → Sergeant → Lieutenant, each rank adding health and damage. You pick who deploys in the briefing. **A marine killed in a mission is gone for good**, and the debrief lists kills, promotions and the fallen. Reinforcements you deploy and who survive join the roster, and fresh recruits keep the squad at six. Progress is saved in the browser; **New campaign** starts over.
+
+### Loot
+
+Dead aliens drop loot: **ore** (cyan crystal), **medkits** (+35% health), **ultimate cells** (+20% ★) and rare **relics** (purple; the Hive Tyrant always drops one). Walk a marine over it to pick it up. Relics stay with that marine for the rest of the campaign: Chitin Plate (+10% health), Acid Gland (+10% damage), Hive Lens (+6% accuracy) and Neural Node (ultimate charges 25% faster). Loot drops in every mode.
 
 ## Hero kits (first person)
 
@@ -77,7 +90,8 @@ Win: hold all 3 relays to drop the hive's bio-shield, then destroy the hive. Los
 | Camera | WASD / arrows, middle-drag, wheel zoom, click minimap | Two-finger pan, pinch zoom, tap minimap |
 | Drop in | **F** or double-click a marine | Double-tap a marine or **Drop in** |
 | First person | WASD, mouse (pointer lock), click or Space to fire | Left stick, drag anywhere on the right to aim, hold **FIRE** (also aims while held); all at once, multitouch |
-| Extras | **Q**/**E** abilities, **X** ultimate, **R** rally, **C** swap, **F**/**Tab** back | Ability buttons and **★** above FIRE, **Rally squad**, **Swap marine**, **◀ Command** |
+| Extras | **Q**/**E** abilities, **X** ultimate, **R** reload, **G** rally, right mouse aim down sights, **C** swap, **F**/**Tab** back | Ability buttons and **★** above FIRE, **Rally squad**, **Swap marine**, **◀ Command** |
+| Campaign turns | Click a marine, click ground to move (hover shows path and cover), click an alien twice to shoot; **O** overwatch, **H** hunker, **G** grenade, **Tab** next marine, **Enter** end turn | Tap a marine, tap a spot or alien once to preview and again to confirm; one finger pans; buttons in the command bar |
 
 ## Graphics
 
@@ -87,7 +101,9 @@ Three graphics levels (menu toggle, saved): **Ultra** (default on desktop) adds 
 
 ## Music
 
-An original soundtrack synthesized live with WebAudio (no audio files): a pad over a D-minor progression on the title screen, a pulsing bass and arpeggio in the field, and drums once aliens close in on your squad. Toggle it on the title screen.
+An original, dark cinematic score synthesized live with WebAudio (no audio files): a low drone and a string ensemble in a big hall reverb over a slow D-minor progression, a pulsing low ostinato with distant sonar pings in the field, and war drums with brass swells once aliens close in on your squad. Toggle it on the title screen.
+
+Guns in first person have aim down sights (right mouse; the Ranger keeps its scope), magazines and reloads (**R**), recoil, brass, a muzzle light and layered gunshots.
 
 ## Code map
 

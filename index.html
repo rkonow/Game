@@ -26,6 +26,7 @@
   <div id="radio"></div>
   <canvas id="minimap" width="150" height="150"></canvas>
   <div id="toast"></div>
+  <div id="turnBanner"></div>
 
   <!-- command panel: who is selected, what they can do, what you can buy -->
   <div id="cmdPanel">
@@ -42,6 +43,11 @@
       <button id="btnAMove" class="live-only" title="Attack-move: next click/tap (X)"><i>⚔</i><span>Attack</span><kbd>X</kbd></button>
       <button id="btnPossess" class="accent" title="Take control of a selected marine (F)"><i>🎯</i><span>Drop in</span><kbd>F</kbd></button>
       <button id="btnGo" class="tac-only go" title="Start the round (Space / Enter)"><i>▶</i><span>Go · 20s</span><kbd>␣</kbd></button>
+      <button id="btnOW" class="xc-only" title="Overwatch: shoot the first alien that moves in range during their turn (O)"><i>👁</i><span>Overwatch</span><kbd>O</kbd></button>
+      <button id="btnHunker" class="xc-only" title="Hunker down: much harder to hit until your next turn (H)"><i>🛡</i><span>Hunker</span><kbd>H</kbd></button>
+      <button id="btnTGren" class="xc-only" title="Frag grenade: always hits everything in the blast (G)"><i>💣</i><span>Grenade</span><kbd>G</kbd></button>
+      <button id="btnTNext" class="xc-only" title="Next marine with actions left (Tab)"><i>⏭</i><span>Next</span><kbd>⇥</kbd></button>
+      <button id="btnEndTurn" class="xc-only go" title="End your turn: the swarm moves (Enter)"><i>⏎</i><span>End turn</span><kbd>↵</kbd></button>
     </div>
     <div id="powers" class="tray">
       <button id="btnBuyTrooper" title="Deploy a marine: rifle, frag grenade (1)"><i>🪖</i><span>Marine</span><small>20</small><kbd>1</kbd></button>
@@ -84,7 +90,7 @@
       <p class="tag">Command the squad. Drop into the fight.</p>
     </div>
     <nav class="mainNav">
-      <button id="btnCamp" class="nav primary"><b>Campaign</b><small>Story missions · your squad remembers</small></button>
+      <button id="btnCamp" class="nav primary"><b>Campaign</b><small>Turn-based story missions · your squad remembers</small></button>
       <button id="btnStart" class="nav"><b>Live battle</b><small>Real-time skirmish against the swarm</small></button>
       <button id="btnStartTac" class="nav"><b>Tactics</b><small>Plan, then 20-second live rounds</small></button>
       <button id="btnHow" class="nav small"><b>How to play</b></button>
@@ -115,12 +121,13 @@
         <h3>First person</h3>
         <ul>
           <li>Stand on a relay to capture it · you deal <b>x2 damage</b></li>
-          <li class="desk">Desktop: <b>WASD</b> + mouse, click to fire, <b>Q</b>/<b>E</b> abilities, <b>X</b> ultimate, <b>R</b> rally, <b>C</b> swap, <b>F</b>/<b>Tab</b> back</li>
+          <li class="desk">Desktop: <b>WASD</b> + mouse, click to fire, <b>Q</b>/<b>E</b> abilities, <b>X</b> ultimate, right mouse aims, <b>R</b> reload, <b>G</b> rally, <b>C</b> swap, <b>F</b>/<b>Tab</b> back</li>
           <li>Touch: left stick, drag right side to aim, hold <b>FIRE</b></li>
           <li>If your marine goes down, wait 5s to drop in again</li>
         </ul>
       </div>
     </div>
+    <p class="roles"><b>Campaign is turn-based:</b> each marine gets 2 actions (move, dash, shoot, overwatch, hunker, grenade). Cover on the shooter's side lowers the hit chance; flank aliens to crit them. Then the swarm takes its turn. Dead aliens drop loot: ore, medkits, ult cells and rare relics your marine keeps.</p>
     <p class="roles">Marine: frag grenade, combat roll, ★ drone swarm · Juggernaut: energy wall, shield charge, ★ shockwave · Ranger: scope, jump jet, ★ recon scan · Watch out for the <b>Hive Tyrant</b> · Alerts have a <b>Drop in</b> button that takes you straight there</p>
     <button id="btnHowBack" class="accent big">Back</button>
   </div>

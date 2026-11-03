@@ -549,3 +549,18 @@ body.fps #ammo { display: flex; }
 #ammo.low b { color: #ff8a6a; }
 #ammo.reload b { font-size: 16px; letter-spacing: .2em; color: #ffd36a; }
 @media (pointer: coarse) { #ammo { bottom: auto; left: auto; top: calc(96px + env(safe-area-inset-top)); right: 12px; } #ammo b { font-size: 24px; } }
+
+/* ---- turn-based campaign */
+#rtsBar button.xc-only { display: none !important; }
+body.xcom #rtsBar button { display: none !important; }
+body.xcom #rtsBar button.xc-only { display: inline-flex !important; }
+body.xcom #rtsBar button.off { opacity: .38; filter: grayscale(.6); }
+body.xcom #rtsBar button.armed { outline: 2px solid #ffaa55; }
+body.xcom #btnEndTurn { background: linear-gradient(180deg, #2f7a4a, #1e5233); }
+#turnBanner { position: fixed; left: 50%; top: 24%; transform: translate(-50%, -50%); pointer-events: none; opacity: 0; text-align: center;
+  font-family: Rajdhani, system-ui, sans-serif; color: #e8f6ff; text-shadow: 0 2px 14px rgba(0,0,0,.8); z-index: 30; }
+#turnBanner b { display: block; font-size: clamp(30px, 6vw, 56px); letter-spacing: .18em; font-weight: 800; }
+#turnBanner small { display: block; font-size: 15px; letter-spacing: .3em; text-transform: uppercase; opacity: .8; }
+#turnBanner.enemy b { color: #ff7a5a; }
+#turnBanner.show { animation: turnBan 1.6s ease-out forwards; }
+@keyframes turnBan { 0% { opacity: 0; transform: translate(-50%, -40%) scale(1.15); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -55%); } }
