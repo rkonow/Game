@@ -2143,17 +2143,27 @@ function onPointsChanged() {
   }
 }
 
+// a spot a marine can actually stand on: off rocks and crates, and not on top of a squadmate
+function standSpot(x, z, gap = 1.3) {
+  for (let r = 0; r <= 6; r++) for (let k = 0; k < Math.max(1, r * 8); k++) {
+    const a = k / Math.max(1, r * 8) * Math.PI * 2, px = x + Math.cos(a) * r * 0.8, pz = z + Math.sin(a) * r * 0.8;
+    if (Math.abs(px) > HALF - 1 || Math.abs(pz) > HALF - 1 || !isFree(toCell(px), toCell(pz))) continue;
+    if (entities.some(e => !e.dead && !e.isBase && Math.hypot(e.x - px, e.z - pz) < gap)) continue;
+    return [px, pz];
+  }
+  const [i, j] = nearestFree(toCell(x), toCell(z)); return [cellCenter(i), cellCenter(j)];
+}
 function spawnPlayer(type) {
   if (camp.m && camp.m.story && story.def) { // story maps: a dropship drops reinforcements at your last checkpoint
     const [cx, cz] = story.def[story.checkpoint].cp;
-    const u = makeUnit(PLAYER, type, cx + (Math.random() - 0.5) * 3, cz + (Math.random() - 0.5) * 3);
+    const u = makeUnit(PLAYER, type, ...standSpot(cx + (Math.random() - 0.5) * 3, cz + (Math.random() - 0.5) * 3));
     smoke(u.x, 0.4, u.z, 1.6, 6);
     radio(`Reinforcement ${NAMES[PLAYER][type].toLowerCase()} dropped at ${story.def[story.checkpoint].name}`, 'good', { dropAt: u });
     if (turn.on) { u.ap = 2; u.gren = type === 'trooper' ? 1 : 0; }
     return u;
   }
   const u = makeUnit(PLAYER, type, (Math.random() - 0.5) * 3, 21.5);
-  if (tac.on || turn.on) { u.x = (Math.random() - 0.5) * 6; u.z = 19 + Math.random(); if (turn.on) { u.ap = 2; u.gren = type === 'trooper' ? 1 : 0; } return u; } // ready to be ordered
+  if (tac.on || turn.on) { [u.x, u.z] = standSpot((Math.random() - 0.5) * 6, 19 + Math.random()); if (turn.on) { u.ap = 2; u.gren = type === 'trooper' ? 1 : 0; } return u; } // ready to be ordered
   commandMove([u], (Math.random() - 0.5) * 8, 17 - Math.random() * 2, 'move', true);
   return u;
 }
@@ -4214,7 +4224,7 @@ async function tbActivate() {
 function beginPlayerTurn(first = false) {
   if (mode === 'over') return;
   turn.side = 'player'; turn.busy = false; turn.tool = 'move'; turn.pending = null; turn.liveUsed = false;
-  for (const u of tbMine()) { u.ap = 2; u.hunker = false; u.ow = false; u.wall = false; }
+  for (const u of tbMine()) { u.ap = 2; u.hunker = false; u.ow = false; u.wall = false; if (!isFree(toCell(u.x), toCell(u.z))) [u.x, u.z] = standSpot(u.x, u.z); } // never start a turn stuck inside a rock
   showTurnBanner(first ? 'YOUR SQUAD' : 'YOUR TURN', `Turn ${turn.n}`);
   tbSelect(tbMine()[0] || null);
   updateButtons();
@@ -5052,7 +5062,7 @@ function launchMission(i, pick, checkpoint = 0) {
   camp.deployed = [];
   pick.forEach((id, k) => {
     const r = campState.roster.find(x => x.id === id); if (!r) return;
-    const [x, z] = spots[k % spots.length];
+    const [x, z] = standSpot(...spots[k % spots.length]);
     const u = makeUnit(PLAYER, r.type, x, z);
     applyRank(u, r);
     camp.deployed.push(u);
